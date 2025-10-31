@@ -1,0 +1,66 @@
+{
+  "name": "Multi-AI Sprint Orchestrator v4.8",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "api/sprint/start"
+      },
+      "name": "Webhook - Start",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8084/api/sprint/start",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {}
+      },
+      "name": "POST /api/sprint/start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook - Start": {
+      "main": [
+        [
+          {
+            "node": "POST /api/sprint/start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /api/sprint/start": {
+      "main": [
+        [
+          {
+            "node": "Respond 202",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

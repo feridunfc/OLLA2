@@ -1,0 +1,4 @@
+policy:
+  budget:
+    monthly_usd: 50.0
+    per_call_max_usd: 5.0

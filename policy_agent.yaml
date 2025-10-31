@@ -1,0 +1,22 @@
+policy:
+  routing:
+    strategy_tasks: ["research", "architecture", "planning"]
+    execution_tasks: ["coding", "testing", "debugging"]
+    critique_tasks: ["review", "analysis"]
+  models:
+    local:
+      strategy: "llama3.1:8b"
+      execution: "codellama:7b"
+      critique: "qwen2.5:7b"
+    cloud:
+      strategy: "gpt-4"
+      execution: "gpt-4o-mini"
+      critique: "gpt-4"
+  budget:
+    monthly_limit: 100.0
+    critical_alert: 10.0
+    cost_tracking: true
+  security:
+    allowed_commands: ["ls", "pwd", "cat", "mkdir", "grep"]
+    max_file_size: 10485760
+    require_approval: true
