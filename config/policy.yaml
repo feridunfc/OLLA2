@@ -1,0 +1,10 @@
+﻿version: "1.0"
+budget_limits:
+  daily: 10.0
+  monthly: 100.0
+  per_request: 0.1
+security:
+  sandbox_enforced: true
+agents:
+  developer:
+    allowed_actions: ["execute_code"]

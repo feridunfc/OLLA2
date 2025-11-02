@@ -59,7 +59,7 @@ def write_to_ledger(manifest_id: str, sprint: str, manifest_path: str):
             sprint,
             hash_value,
             signature,
-            datetime.datetime.utcnow().isoformat(),
+            datetime.datetime.now(datetime.UTC).isoformat(),
         ),
     )
     conn.commit()
