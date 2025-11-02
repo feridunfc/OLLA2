@@ -16,3 +16,18 @@ ledger.db
 # Logs & temp
 *.log
 *.tmp
+
+# secrets & local runtime
+keys/
+*.pem
+*.key
+*.crt
+
+# local configs
+config/*.local.yaml
+config/*.secrets.yaml
+
+# sqlite
+*.db
+*.db-shm
+*.db-wal
