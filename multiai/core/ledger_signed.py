@@ -1,87 +1,42 @@
-"""
-Ledger & Determinism — v4.9
-Kurumsal izlenebilirlik ve tekrarlanabilirlik için imzalı manifest ledger'ı.
-"""
-
-import hashlib
-import sqlite3
-import datetime
-import subprocess
-import os
+# multiai/core/ledger_signed.py
+import sqlite3, json, hashlib, datetime
 from pathlib import Path
-
+from .ledger_sign import sign_manifest, load_public_pem, load_private_pem
 
 LEDGER_PATH = Path("ledger.db")
 
+def get_conn(path: Path = LEDGER_PATH):
+    conn = sqlite3.connect(str(path), timeout=30, isolation_level=None, check_same_thread=False)
+    # WAL + biraz performans
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    return conn
 
-def compute_hash(file_path: str) -> str:
-    """Dosyanın SHA256 hash'ini üret."""
-    with open(file_path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+def write_manifest_to_ledger(manifest: dict, signer_id: str = "system"):
+    """Manifest'i imzalayıp ledger tablosuna ekler."""
+    conn = get_conn()
+    try:
+        manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
+        signature_b64 = sign_manifest(manifest_bytes)
+        public_pem = load_public_pem().decode("utf-8")
 
-
-def sign_hash(hash_value: str) -> str:
-    """Test ortamı için sahte imza üretir."""
-    return f"FAKE_SIGNATURE::{hash_value[:12]}"
-
-
-
-def init_ledger():
-    """Ledger veritabanını oluştur (yoksa)."""
-    conn = sqlite3.connect(LEDGER_PATH)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ledger (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            manifest_id TEXT,
-            sprint TEXT,
-            hash TEXT,
-            signature TEXT,
-            created_at TEXT
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO ledger (sprint, manifest_id, manifest_hash, signature, public_key, signer_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                manifest.get("sprint") or manifest.get("sprint_id") or "",
+                manifest.get("id") or manifest.get("manifest_id") or "",
+                manifest_hash,
+                signature_b64,
+                public_pem,
+                signer_id,
+                datetime.datetime.now(datetime.UTC).isoformat(),
+            ),
         )
-        """
-    )
-    conn.commit()
-    conn.close()
-
-
-def write_to_ledger(manifest_id: str, sprint: str, manifest_path: str):
-    """Manifest dosyasını hashle, imzala ve ledger’a yaz."""
-    init_ledger()
-    hash_value = compute_hash(manifest_path)
-    signature = sign_hash(hash_value)
-
-    conn = sqlite3.connect(LEDGER_PATH)
-    conn.execute(
-        "INSERT INTO ledger (manifest_id, sprint, hash, signature, created_at) VALUES (?, ?, ?, ?, ?)",
-        (
-            manifest_id,
-            sprint,
-            hash_value,
-            signature,
-            datetime.datetime.utcnow().isoformat(),
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-    print(f"[✔] Ledger’a eklendi: {manifest_id} | {sprint}")
-    return hash_value
-
-
-def verify_manifest(manifest_path: str, expected_hash: str) -> bool:
-    """Manifest dosyasının hash’ini kontrol et."""
-    current_hash = compute_hash(manifest_path)
-    return current_hash == expected_hash
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Ledger & Determinism CLI")
-    parser.add_argument("--manifest", required=True, help="Manifest dosya yolu")
-    parser.add_argument("--sprint", required=True, help="Sprint adı")
-    parser.add_argument("--id", required=True, help="Manifest ID")
-    args = parser.parse_args()
-
-    write_to_ledger(args.id, args.sprint, args.manifest)
+        return manifest_hash, signature_b64
+    finally:
+        conn.close()

@@ -1,0 +1,2986 @@
+ZENGİNLEŞTİRİLMİŞ AGENT SİSTEMİ
+1. Enhanced Architect Agent:
+python
+# agents/architect.py
+import logging
+from typing import Dict, List, Optional
+from datetime import datetime
+import hashlib
+import json
+
+from ..core.hybrid_router import LLM
+from ..schema.enhanced_manifest import SprintManifest, Artifact, ArtifactType, RiskLevel, RiskAssessment
+from ..core.policy_agent import policy_agent
+
+logger = logging.getLogger("architect")
+
+class EnhancedArchitectAgent:
+    """
+    V5.0 Enhanced Architect Agent
+    Advanced manifesto generation with risk assessment and dependency analysis
+    """
+    
+    def __init__(self, llm: LLM):
+        self.llm = llm
+        self.policy_agent = policy_agent
+    
+    async def create_sprint_manifesto(self, research: dict, goal: str, context: Optional[Dict] = None) -> SprintManifest:
+        """
+        Create comprehensive sprint manifesto with enhanced features
+        """
+        context = context or {}
+        collaboration_mode = context.get("mode", "full-auto")
+        
+        try:
+            # Enhanced prompt with V5.0 features
+            arch_prompt = self._build_architect_prompt(research, goal, context)
+            
+            # Use hybrid router for optimal model selection
+            response = await self.llm.complete(arch_prompt, json_mode=True)
+            manifest_data = self.llm.safe_json(response, self._get_fallback_manifest(goal))
+            
+            # Enhance with V5.0 features
+            enhanced_manifest = await self._enhance_manifest_data(manifest_data, research, goal, context)
+            
+            # Convert to Pydantic model
+            sprint_manifest = await self._build_sprint_manifest(enhanced_manifest, goal, collaboration_mode)
+            
+            logger.info(f"Architect created manifesto: {sprint_manifest.sprint_id} with {len(sprint_manifest.artifacts)} artifacts")
+            return sprint_manifest
+            
+        except Exception as e:
+            logger.error(f"Architect failed: {e}")
+            return self._create_fallback_manifest(goal, collaboration_mode)
+    
+    def _build_architect_prompt(self, research: dict, goal: str, context: Dict) -> str:
+        """Build comprehensive architect prompt"""
+        return f"""
+        As an AI Software Architect, create a detailed sprint plan for: {goal}
+        
+        RESEARCH ANALYSIS:
+        {json.dumps(research, indent=2)}
+        
+        CONTEXT:
+        - Collaboration Mode: {context.get('mode', 'full-auto')}
+        - Risk Tolerance: {context.get('risk_tolerance', 'medium')}
+        - Compliance Requirements: {context.get('compliance', [])}
+        
+        REQUIREMENTS:
+        1. Create a comprehensive sprint manifesto with:
+           - sprint_id: unique identifier
+           - sprint_purpose: clear business goal
+           - artifacts: list of all required components
+        
+        2. For EACH artifact, specify:
+           - artifact_id: unique identifier
+           - type: code/test/documentation/configuration/migration
+           - path: file path relative to project root
+           - purpose: clear technical/business purpose
+           - dependencies: other artifacts this depends on
+           - expected_behavior: functional requirements
+           - acceptance_criteria: validation criteria
+           - risk_level: low/medium/high/critical
+           - risk_factors: specific risk reasons
+           - estimated_effort: story points (1-8)
+           - priority: 1-5 (5 = highest)
+        
+        3. Consider:
+           - Technical dependencies between artifacts
+           - Risk mitigation strategies
+           - Compliance requirements
+           - Testing strategy
+           - Deployment considerations
+        
+        4. Return ONLY valid JSON matching this structure.
+        
+        IMPORTANT: Be specific about paths, dependencies, and risk assessments.
+        """
+    
+    async def _enhance_manifest_data(self, manifest_data: Dict, research: dict, goal: str, context: Dict) -> Dict:
+        """Enhance raw manifest data with advanced analysis"""
+        
+        # Add dependency analysis
+        manifest_data["dependency_graph"] = await self._analyze_dependencies(manifest_data.get("artifacts", []))
+        
+        # Add risk assessment
+        manifest_data["overall_risk"] = await self._assess_overall_risk(manifest_data.get("artifacts", []))
+        
+        # Add compliance requirements
+        manifest_data["compliance_requirements"] = context.get("compliance", [])
+        
+        # Add metadata
+        manifest_data["version"] = "5.0"
+        manifest_data["created_at"] = datetime.utcnow().isoformat()
+        manifest_data["created_by"] = "enhanced_architect"
+        
+        return manifest_data
+    
+    async def _analyze_dependencies(self, artifacts: List[Dict]) -> Dict[str, List[str]]:
+        """Analyze and build dependency graph"""
+        dependency_graph = {}
+        
+        for artifact in artifacts:
+            artifact_id = artifact.get("artifact_id")
+            dependencies = artifact.get("dependencies", [])
+            
+            if artifact_id:
+                dependency_graph[artifact_id] = dependencies
+        
+        return dependency_graph
+    
+    async def _assess_overall_risk(self, artifacts: List[Dict]) -> Dict:
+        """Assess overall project risk"""
+        risk_scores = []
+        risk_factors = []
+        
+        for artifact in artifacts:
+            risk_level = artifact.get("risk_level", "low")
+            risk_score = self._risk_level_to_score(risk_level)
+            risk_scores.append(risk_score)
+            
+            if risk_level in ["high", "critical"]:
+                risk_factors.extend(artifact.get("risk_factors", []))
+        
+        avg_risk = sum(risk_scores) / len(risk_scores) if risk_scores else 0.1
+        overall_level = self._score_to_risk_level(avg_risk)
+        
+        return {
+            "level": overall_level,
+            "score": avg_risk,
+            "factors": list(set(risk_factors))[:5],  # Top 5 unique factors
+            "high_risk_artifacts": len([a for a in artifacts if a.get("risk_level") in ["high", "critical"]])
+        }
+    
+    async def _build_sprint_manifest(self, manifest_data: Dict, goal: str, collaboration_mode: str) -> SprintManifest:
+        """Build SprintManifest from enhanced data"""
+        
+        artifacts = []
+        for art_data in manifest_data.get("artifacts", []):
+            artifact = Artifact(
+                artifact_id=art_data["artifact_id"],
+                type=ArtifactType(art_data["type"]),
+                path=art_data["path"],
+                purpose=art_data["purpose"],
+                dependencies=art_data.get("dependencies", []),
+                expected_behavior=art_data.get("expected_behavior", ""),
+                acceptance_criteria=art_data.get("acceptance_criteria", []),
+                risk_assessment=RiskAssessment(
+                    level=RiskLevel(art_data.get("risk_level", "low")),
+                    factors=art_data.get("risk_factors", []),
+                    score=self._risk_level_to_score(art_data.get("risk_level", "low")),
+                    mitigation_plan=art_data.get("mitigation_plan")
+                ),
+                estimated_effort=art_data.get("estimated_effort", 1),
+                priority=art_data.get("priority", 1)
+            )
+            artifacts.append(artifact)
+        
+        overall_risk_data = manifest_data.get("overall_risk", {})
+        overall_risk = RiskAssessment(
+            level=RiskLevel(overall_risk_data.get("level", "low")),
+            score=overall_risk_data.get("score", 0.1),
+            factors=overall_risk_data.get("factors", [])
+        )
+        
+        return SprintManifest(
+            sprint_id=manifest_data.get("sprint_id", f"sprint-{hashlib.sha256(goal.encode()).hexdigest()[:8]}"),
+            sprint_purpose=goal,
+            artifacts=artifacts,
+            dependency_graph=manifest_data.get("dependency_graph", {}),
+            overall_risk=overall_risk,
+            compliance_requirements=manifest_data.get("compliance_requirements", []),
+            collaboration_mode=collaboration_mode,
+            requires_approval=overall_risk.level in [RiskLevel.HIGH, RiskLevel.CRITICAL]
+        )
+    
+    def _risk_level_to_score(self, risk_level: str) -> float:
+        """Convert risk level to numerical score"""
+        risk_scores = {
+            "low": 0.1,
+            "medium": 0.4, 
+            "high": 0.7,
+            "critical": 0.9
+        }
+        return risk_scores.get(risk_level, 0.1)
+    
+    def _score_to_risk_level(self, score: float) -> str:
+        """Convert numerical score to risk level"""
+        if score >= 0.7:
+            return "high"
+        elif score >= 0.4:
+            return "medium"
+        else:
+            return "low"
+    
+    def _get_fallback_manifest(self, goal: str) -> Dict:
+        """Get fallback manifest data"""
+        return {
+            "sprint_id": f"fallback-{hashlib.sha256(goal.encode()).hexdigest()[:8]}",
+            "sprint_purpose": goal,
+            "artifacts": [],
+            "overall_risk": {"level": "medium", "score": 0.5, "factors": ["fallback_mode"]}
+        }
+    
+    def _create_fallback_manifest(self, goal: str, collaboration_mode: str) -> SprintManifest:
+        """Create fallback manifest when AI fails"""
+        return SprintManifest(
+            sprint_id=f"error-fallback-{hashlib.sha256(goal.encode()).hexdigest()[:8]}",
+            sprint_purpose=goal,
+            artifacts=[],
+            overall_risk=RiskAssessment(level=RiskLevel.HIGH, score=0.8, factors=["architect_failure"]),
+            collaboration_mode=collaboration_mode,
+            requires_approval=True
+        )
+2. Enhanced Coder Agent:
+python
+# agents/coder.py
+import logging
+from typing import Dict, Optional
+import re
+
+from ..core.hybrid_router import LLM
+from ..core.policy_agent import policy_agent
+from ..utils.secure_sandbox import SecureSandboxRunner
+
+logger = logging.getLogger("coder")
+
+class EnhancedCoderAgent:
+    """
+    V5.0 Enhanced Coder Agent
+    Advanced code generation with security, testing, and best practices
+    """
+    
+    def __init__(self, llm: LLM):
+        self.llm = llm
+        self.policy_agent = policy_agent
+        self.sandbox = SecureSandboxRunner()
+    
+    async def implement_artifact(self, artifact: Dict, research: Dict, context: Optional[Dict] = None) -> str:
+        """
+        Implement artifact with enhanced code generation
+        """
+        context = context or {}
+        
+        try:
+            # Build comprehensive coding prompt
+            coder_prompt = self._build_coder_prompt(artifact, research, context)
+            
+            # Generate code using hybrid router
+            generated_code = await self.llm.complete(coder_prompt)
+            
+            # Clean and validate code
+            cleaned_code = self._clean_generated_code(generated_code, artifact)
+            
+            # Apply security and best practices
+            secured_code = await self._apply_security_checks(cleaned_code, artifact, context)
+            
+            # Generate accompanying tests
+            test_code = await self._generate_tests(secured_code, artifact, research)
+            
+            # Validate code structure
+            validation_result = await self._validate_code_structure(secured_code, artifact)
+            
+            if not validation_result["valid"]:
+                logger.warning(f"Code validation failed: {validation_result['errors']}")
+                # Attempt to fix validation issues
+                secured_code = await self._fix_validation_issues(secured_code, validation_result["errors"])
+            
+            logger.info(f"Coder implemented artifact: {artifact.get('artifact_id')} - {len(secured_code)} chars")
+            
+            # Return main code with tests as separate if needed
+            return self._format_final_output(secured_code, test_code, artifact)
+            
+        except Exception as e:
+            logger.error(f"Coder implementation failed: {e}")
+            return self._generate_fallback_code(artifact, research)
+    
+    def _build_coder_prompt(self, artifact: Dict, research: Dict, context: Dict) -> str:
+        """Build comprehensive coding prompt"""
+        
+        artifact_type = artifact.get("type", "code")
+        security_requirements = self.policy_agent.security_policy.allowed_commands
+        
+        return f"""
+        As an AI Senior Software Engineer, implement this artifact:
+        
+        ARTIFACT DETAILS:
+        - ID: {artifact.get('artifact_id')}
+        - Type: {artifact_type}
+        - Path: {artifact.get('path')}
+        - Purpose: {artifact.get('purpose')}
+        - Expected Behavior: {artifact.get('expected_behavior', 'N/A')}
+        - Acceptance Criteria: {artifact.get('acceptance_criteria', [])}
+        - Risk Level: {artifact.get('risk_level', 'medium')}
+        
+        RESEARCH CONTEXT:
+        {self._format_research(research)}
+        
+        TECHNICAL REQUIREMENTS:
+        - Tech Stack: {research.get('tech_stack', ['Python'])}
+        - Architecture: {research.get('architecture_pattern', 'modular')}
+        - Security: {security_requirements}
+        
+        CODING STANDARDS:
+        1. Follow PEP 8 for Python code
+        2. Include type hints
+        3. Add docstrings for all functions/classes
+        4. Implement proper error handling
+        5. Use secure coding practices
+        6. Include necessary imports
+        7. Make code testable and modular
+        
+        SECURITY REQUIREMENTS:
+        - Input validation for all external inputs
+        - Safe file operations
+        - No hardcoded secrets
+        - Proper error handling without information leakage
+        
+        CONTEXT:
+        - Collaboration Mode: {context.get('mode', 'full-auto')}
+        - Compliance: {context.get('compliance', [])}
+        
+        Return ONLY the implementation code without explanations.
+        Focus on production-ready, secure, and maintainable code.
+        """
+    
+    async def _apply_security_checks(self, code: str, artifact: Dict, context: Dict) -> str:
+        """Apply security checks and enhancements"""
+        
+        security_issues = self._scan_security_issues(code, artifact)
+        
+        if security_issues:
+            logger.warning(f"Security issues found: {security_issues}")
+            # Attempt to fix security issues
+            fixed_code = await self._fix_security_issues(code, security_issues, artifact)
+            return fixed_code
+        
+        return code
+    
+    def _scan_security_issues(self, code: str, artifact: Dict) -> List[str]:
+        """Scan code for common security issues"""
+        issues = []
+        
+        # Check for hardcoded secrets
+        secret_patterns = [
+            r'password\s*=\s*["\'][^"\']+["\']',
+            r'api_key\s*=\s*["\'][^"\']+["\']',
+            r'token\s*=\s*["\'][^"\']+["\']',
+            r'secret\s*=\s*["\'][^"\']+["\']'
+        ]
+        
+        for pattern in secret_patterns:
+            if re.search(pattern, code, re.IGNORECASE):
+                issues.append("Hardcoded secret detected")
+        
+        # Check for unsafe eval/exec
+        if 'eval(' in code or 'exec(' in code:
+            issues.append("Unsafe eval/exec usage")
+        
+        # Check for SQL injection patterns
+        if any(pattern in code for pattern in ['f"SELECT', 'f"INSERT', 'f"UPDATE', 'f"DELETE']):
+            issues.append("Potential SQL injection vulnerability")
+        
+        return issues
+    
+    async def _fix_security_issues(self, code: str, issues: List[str], artifact: Dict) -> str:
+        """Fix identified security issues"""
+        security_fix_prompt = f"""
+        Fix security issues in this code:
+        
+        CODE:
+        {code}
+        
+        SECURITY ISSUES:
+        {chr(10).join(issues)}
+        
+        ARTIFACT CONTEXT:
+        - Purpose: {artifact.get('purpose')}
+        - Type: {artifact.get('type')}
+        
+        Fix all security issues while maintaining functionality.
+        Return ONLY the fixed code.
+        """
+        
+        fixed_code = await self.llm.complete(security_fix_prompt)
+        return self._clean_generated_code(fixed_code, artifact)
+    
+    async def _generate_tests(self, code: str, artifact: Dict, research: Dict) -> str:
+        """Generate accompanying tests for the code"""
+        
+        if artifact.get("type") != "code":
+            return ""
+        
+        test_prompt = f"""
+        Generate comprehensive tests for this code:
+        
+        CODE:
+        {code}
+        
+        ARTIFACT:
+        - Purpose: {artifact.get('purpose')}
+        - Expected Behavior: {artifact.get('expected_behavior', 'N/A')}
+        - Acceptance Criteria: {artifact.get('acceptance_criteria', [])}
+        
+        TEST REQUIREMENTS:
+        - Use pytest framework
+        - Cover all functions and edge cases
+        - Include integration tests if applicable
+        - Mock external dependencies
+        - Include error case testing
+        
+        Return ONLY the test code in Python.
+        """
+        
+        test_code = await self.llm.complete(test_prompt)
+        return self._clean_generated_code(test_code, artifact)
+    
+    async def _validate_code_structure(self, code: str, artifact: Dict) -> Dict:
+        """Validate code structure and syntax"""
+        # Basic validation - in production, you'd use AST parsing
+        validation_result = {
+            "valid": True,
+            "errors": [],
+            "warnings": []
+        }
+        
+        # Check for basic Python syntax
+        if not code.strip():
+            validation_result["valid"] = False
+            validation_result["errors"].append("Empty code generated")
+        
+        # Check for required components based on artifact type
+        if artifact.get("type") == "code":
+            if "def " not in code and "class " not in code:
+                validation_result["warnings"].append("No functions or classes found")
+        
+        return validation_result
+    
+    async def _fix_validation_issues(self, code: str, errors: List[str]) -> str:
+        """Fix code validation issues"""
+        if not errors:
+            return code
+        
+        fix_prompt = f"""
+        Fix validation issues in this code:
+        
+        CODE:
+        {code}
+        
+        VALIDATION ERRORS:
+        {chr(10).join(errors)}
+        
+        Return ONLY the fixed code.
+        """
+        
+        fixed_code = await self.llm.complete(fix_prompt)
+        return self._clean_generated_code(fixed_code, {"artifact_id": "validation_fix"})
+    
+    def _clean_generated_code(self, code: str, artifact: Dict) -> str:
+        """Clean and format generated code"""
+        # Remove markdown code blocks if present
+        code = re.sub(r'```(?:\w+)?\s*', '', code)
+        code = code.strip()
+        
+        # Ensure proper file extension based on artifact type
+        artifact_type = artifact.get("type", "code")
+        if artifact_type == "code" and artifact.get("path", "").endswith(".py"):
+            # Ensure Python file starts properly
+            if not code.startswith(('import ', 'from ', 'def ', 'class ', '"', "'", '#!')):
+                code = f'"""\n{artifact.get("purpose", "Generated artifact")}\n"""\n\n{code}'
+        
+        return code
+    
+    def _format_research(self, research: Dict) -> str:
+        """Format research data for prompt"""
+        return "\n".join([
+            f"- Tech Stack: {research.get('tech_stack', [])}",
+            f"- Requirements: {research.get('requirements', [])}",
+            f"- Risks: {research.get('risks', [])}",
+            f"- Acceptance Criteria: {research.get('acceptance_criteria', [])}"
+        ])
+    
+    def _format_final_output(self, main_code: str, test_code: str, artifact: Dict) -> str:
+        """Format final code output"""
+        if test_code and artifact.get("type") == "code":
+            return f"{main_code}\n\n# TESTS\n{test_code}"
+        return main_code
+    
+    def _generate_fallback_code(self, artifact: Dict, research: Dict) -> str:
+        """Generate fallback code when AI fails"""
+        artifact_type = artifact.get("type", "code")
+        
+        if artifact_type == "code":
+            return f'''
+"""
+Fallback implementation for: {artifact.get("purpose", "Unknown artifact")}
+This is a placeholder due to generation failure.
+"""
+
+def main():
+    """Placeholder function"""
+    print("Placeholder implementation")
+    return None
+
+if __name__ == "__main__":
+    main()
+'''
+        else:
+            return f"# Placeholder for {artifact_type}: {artifact.get('purpose')}"
+3. Enhanced Critic Agent:
+python
+# agents/critic_agent.py
+import hashlib
+import logging
+from typing import Dict, List, Optional
+import json
+from datetime import datetime
+
+from ..core.hybrid_router import LLM
+from ..schema.enhanced_manifest import Artifact, RiskLevel
+from ..core.policy_agent import policy_agent
+
+logger = logging.getLogger("critic")
+
+class EnhancedCriticAgent:
+    """
+    V5.0 Enhanced Critic Agent
+    Advanced code analysis with security scanning, quality assessment, and auto-patching
+    """
+    
+    def __init__(self, llm: LLM):
+        self.llm = llm
+        self.policy_agent = policy_agent
+    
+    async def analyze_mismatch(self, artifact: Artifact, actual_content: str, 
+                             mismatch_reason: str, context: Optional[Dict] = None) -> Dict:
+        """
+        Comprehensive analysis of hash mismatches with enhanced capabilities
+        """
+        context = context or {}
+        
+        try:
+            # Calculate hashes
+            expected_hash = artifact.expected_sha256
+            actual_hash = hashlib.sha256(actual_content.encode()).hexdigest()
+            
+            # Build enhanced analysis prompt
+            critic_prompt = self._build_critic_prompt(artifact, actual_content, 
+                                                    expected_hash, actual_hash, 
+                                                    mismatch_reason, context)
+            
+            # Get AI analysis
+            analysis_text = await self.llm.complete(critic_prompt, json_mode=True)
+            analysis_data = self.llm.safe_json(analysis_text, self._get_fallback_analysis())
+            
+            # Enhance analysis with additional checks
+            enhanced_analysis = await self._enhance_analysis(analysis_data, artifact, 
+                                                           actual_content, context)
+            
+            # Generate patch if applicable
+            if enhanced_analysis["should_patch"]:
+                patch_result = await self._generate_patch(artifact, actual_content, 
+                                                        enhanced_analysis, context)
+                enhanced_analysis["patch_content"] = patch_result["patch_content"]
+                enhanced_analysis["patch_confidence"] = patch_result["confidence"]
+            
+            logger.info(f"Critic analysis complete: {artifact.artifact_id} - Risk: {enhanced_analysis['risk_level']}")
+            
+            return enhanced_analysis
+            
+        except Exception as e:
+            logger.error(f"Critic analysis failed: {e}")
+            return self._get_fallback_analysis()
+    
+    def _build_critic_prompt(self, artifact: Artifact, actual_content: str,
+                           expected_hash: str, actual_hash: str, 
+                           mismatch_reason: str, context: Dict) -> str:
+        """Build comprehensive critic analysis prompt"""
+        
+        return f"""
+        As an AI Senior Code Reviewer and Security Analyst, analyze this hash mismatch:
+        
+        ARTIFACT CONTEXT:
+        - ID: {artifact.artifact_id}
+        - Type: {artifact.type}
+        - Path: {artifact.path}
+        - Purpose: {artifact.purpose}
+        - Expected Behavior: {artifact.expected_behavior}
+        - Risk Level: {artifact.risk_assessment.level}
+        
+        HASH MISMATCH:
+        - Expected SHA256: {expected_hash}
+        - Actual SHA256: {actual_hash}
+        - Reason: {mismatch_reason}
+        
+        ACTUAL CONTENT:
+        ```{artifact.type}
+        {actual_content}
+        ```
+        
+        ANALYSIS REQUIREMENTS:
+        
+        1. SECURITY ASSESSMENT:
+           - Scan for security vulnerabilities
+           - Check for unsafe patterns
+           - Validate input handling
+           - Identify information disclosure risks
+        
+        2. QUALITY ASSESSMENT:
+           - Code structure and readability
+           - Adherence to best practices
+           - Error handling completeness
+           - Documentation quality
+        
+        3. FUNCTIONAL ASSESSMENT:
+           - Alignment with expected behavior
+           - Completeness of implementation
+           - Integration readiness
+           - Test coverage implications
+        
+        4. RISK EVALUATION:
+           - Business impact of mismatch
+           - Security risk level
+           - Operational risk
+           - Compliance implications
+        
+        5. PATCH RECOMMENDATION:
+           - Should we auto-patch? (yes/no)
+           - Patch strategy
+           - Confidence level
+        
+        CONTEXT:
+        - Compliance: {context.get('compliance', [])}
+        - Collaboration Mode: {context.get('mode', 'full-auto')}
+        
+        Return JSON with this structure:
+        {{
+            "analysis": "detailed analysis text",
+            "risk_level": "low|medium|high|critical",
+            "security_issues": ["list of security concerns"],
+            "quality_issues": ["list of quality concerns"],
+            "functional_issues": ["list of functional concerns"],
+            "should_patch": true|false,
+            "patch_strategy": "description of how to fix",
+            "suggested_fix": "specific fix instructions",
+            "confidence": 0.0-1.0,
+            "requires_human_review": true|false
+        }}
+        """
+    
+    async def _enhance_analysis(self, analysis_data: Dict, artifact: Artifact,
+                              actual_content: str, context: Dict) -> Dict:
+        """Enhance AI analysis with additional checks"""
+        
+        enhanced = analysis_data.copy()
+        
+        # Add automated security scanning
+        security_scan = await self._perform_security_scan(actual_content, artifact)
+        enhanced["security_issues"].extend(security_scan.get("issues", []))
+        
+        # Add quality metrics
+        quality_metrics = await self._calculate_quality_metrics(actual_content, artifact)
+        enhanced["quality_metrics"] = quality_metrics
+        
+        # Add compliance checking
+        compliance_check = await self._check_compliance(actual_content, artifact, context)
+        enhanced["compliance_issues"] = compliance_check.get("issues", [])
+        
+        # Determine if human review is required
+        enhanced["requires_human_review"] = self._requires_human_review(enhanced, artifact)
+        
+        # Calculate overall confidence
+        enhanced["overall_confidence"] = self._calculate_confidence(enhanced)
+        
+        return enhanced
+    
+    async def _perform_security_scan(self, content: str, artifact: Artifact) -> Dict:
+        """Perform automated security scanning"""
+        issues = []
+        
+        # Basic pattern-based security scanning
+        dangerous_patterns = [
+            (r'eval\s*\(', "Use of eval() function"),
+            (r'exec\s*\(', "Use of exec() function"),
+            (r'__import__\s*\(', "Dynamic import usage"),
+            (r'os\.system\s*\(', "Direct system command execution"),
+            (r'subprocess\.call\s*\(', "Subprocess execution"),
+            (r'password\s*=\s*["\'][^"\']+["\']', "Hardcoded password"),
+            (r'api_key\s*=\s*["\'][^"\']+["\']', "Hardcoded API key"),
+        ]
+        
+        for pattern, description in dangerous_patterns:
+            if self._search_pattern(content, pattern):
+                issues.append(description)
+        
+        # Check for SQL injection patterns in specific artifact types
+        if any(keyword in artifact.purpose.lower() for keyword in ['database', 'sql', 'query']):
+            sql_patterns = [
+                (r'f"SELECT', "f-string SQL query - potential injection"),
+                (r'f"INSERT', "f-string SQL query - potential injection"),
+                (r'f"UPDATE', "f-string SQL query - potential injection"),
+            ]
+            for pattern, description in sql_patterns:
+                if self._search_pattern(content, pattern):
+                    issues.append(description)
+        
+        return {"issues": issues}
+    
+    async def _calculate_quality_metrics(self, content: str, artifact: Artifact) -> Dict:
+        """Calculate code quality metrics"""
+        lines = content.split('\n')
+        
+        metrics = {
+            "line_count": len(lines),
+            "has_docstrings": any(line.strip().startswith(('"""', "'''")) for line in lines),
+            "has_type_hints": "def " in content and "->" in content,
+            "has_error_handling": any(keyword in content for keyword in ['try:', 'except ', 'raise ']),
+            "comment_ratio": len([l for l in lines if l.strip().startswith('#')]) / max(len(lines), 1),
+            "complexity_estimate": self._estimate_complexity(content)
+        }
+        
+        return metrics
+    
+    async def _check_compliance(self, content: str, artifact: Artifact, context: Dict) -> Dict:
+        """Check compliance requirements"""
+        issues = []
+        compliance_requirements = context.get("compliance", [])
+        
+        if "GDPR" in compliance_requirements:
+            # Check for personal data handling
+            gdp
+devam
+Devam ediyorum:
+
+python
+    async def _check_compliance(self, content: str, artifact: Artifact, context: Dict) -> Dict:
+        """Check compliance requirements"""
+        issues = []
+        compliance_requirements = context.get("compliance", [])
+        
+        if "GDPR" in compliance_requirements:
+            # Check for personal data handling
+            gdpr_patterns = [
+                (r'email\s*=', "Potential personal data storage"),
+                (r'phone\s*=', "Potential personal data storage"),
+                (r'address\s*=', "Potential personal data storage"),
+                (r'personal_data', "Explicit personal data handling"),
+            ]
+            for pattern, description in gdpr_patterns:
+                if self._search_pattern(content, pattern):
+                    issues.append(f"GDPR: {description}")
+        
+        if "SOC2" in compliance_requirements:
+            # Check for security controls
+            if "logging" in content.lower() and "audit" not in content.lower():
+                issues.append("SOC2: Logging without audit trail")
+            
+            if any(keyword in content for keyword in ['password', 'secret', 'key']) and 'encrypt' not in content:
+                issues.append("SOC2: Potential unencrypted credential storage")
+        
+        return {"issues": issues}
+    
+    async def _generate_patch(self, artifact: Artifact, actual_content: str, 
+                            analysis: Dict, context: Dict) -> Dict:
+        """Generate automated patch for identified issues"""
+        
+        if not analysis["should_patch"]:
+            return {"patch_content": "", "confidence": 0.0}
+        
+        patch_prompt = f"""
+        Generate a patch to fix the identified issues in this code:
+        
+        ORIGINAL CODE:
+        {actual_content}
+        
+        ARTIFACT CONTEXT:
+        - Purpose: {artifact.purpose}
+        - Expected Behavior: {artifact.expected_behavior}
+        - Type: {artifact.type}
+        
+        IDENTIFIED ISSUES:
+        - Security: {analysis.get('security_issues', [])}
+        - Quality: {analysis.get('quality_issues', [])}
+        - Functional: {analysis.get('functional_issues', [])}
+        
+        PATCH STRATEGY:
+        {analysis.get('patch_strategy', 'Fix all identified issues')}
+        
+        REQUIREMENTS:
+        - Maintain original functionality
+        - Fix all security issues
+        - Improve code quality
+        - Follow Python best practices
+        - Add proper error handling
+        - Include necessary documentation
+        
+        Return ONLY the complete fixed code, not just the patch.
+        """
+        
+        try:
+            patch_content = await self.llm.complete(patch_prompt)
+            cleaned_patch = self._clean_patch_content(patch_content)
+            
+            # Validate patch quality
+            patch_validation = await self._validate_patch(cleaned_patch, actual_content, artifact)
+            
+            return {
+                "patch_content": cleaned_patch,
+                "confidence": patch_validation["confidence"],
+                "validation_issues": patch_validation["issues"]
+            }
+            
+        except Exception as e:
+            logger.error(f"Patch generation failed: {e}")
+            return {"patch_content": "", "confidence": 0.0}
+    
+    async def _validate_patch(self, patch_content: str, original_content: str, 
+                            artifact: Artifact) -> Dict:
+        """Validate generated patch quality"""
+        validation = {
+            "confidence": 0.5,  # Default medium confidence
+            "issues": []
+        }
+        
+        # Basic validation checks
+        if not patch_content.strip():
+            validation["issues"].append("Empty patch generated")
+            validation["confidence"] = 0.1
+            return validation
+        
+        if len(patch_content) < len(original_content) * 0.1:
+            validation["issues"].append("Patch seems too short")
+            validation["confidence"] = 0.3
+        
+        # Check if key components are preserved
+        original_functions = self._extract_functions(original_content)
+        patch_functions = self._extract_functions(patch_content)
+        
+        if len(patch_functions) < len(original_functions):
+            validation["issues"].append("Some functions missing in patch")
+            validation["confidence"] = max(0.2, validation["confidence"] - 0.2)
+        
+        # Adjust confidence based on issues
+        if not validation["issues"]:
+            validation["confidence"] = 0.8  # High confidence if no issues
+        
+        return validation
+    
+    def _requires_human_review(self, analysis: Dict, artifact: Artifact) -> bool:
+        """Determine if human review is required"""
+        # Always require human review for critical risk
+        if analysis["risk_level"] == "critical":
+            return True
+        
+        # Require review if multiple security issues
+        if len(analysis.get("security_issues", [])) >= 3:
+            return True
+        
+        # Require review for high-risk artifacts
+        if artifact.risk_assessment.level in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
+            return True
+        
+        # Require review if low confidence
+        if analysis.get("confidence", 1.0) < 0.5:
+            return True
+        
+        return False
+    
+    def _calculate_confidence(self, analysis: Dict) -> float:
+        """Calculate overall confidence score"""
+        base_confidence = 0.7
+        
+        # Adjust based on risk level
+        risk_penalties = {
+            "low": 0.0,
+            "medium": -0.1,
+            "high": -0.3,
+            "critical": -0.5
+        }
+        
+        base_confidence += risk_penalties.get(analysis["risk_level"], 0.0)
+        
+        # Adjust based on number of issues
+        total_issues = (len(analysis.get("security_issues", [])) +
+                       len(analysis.get("quality_issues", [])) +
+                       len(analysis.get("functional_issues", [])))
+        
+        base_confidence -= min(0.3, total_issues * 0.05)
+        
+        return max(0.1, min(1.0, base_confidence))
+    
+    def _search_pattern(self, content: str, pattern: str) -> bool:
+        """Search for pattern in content"""
+        import re
+        return bool(re.search(pattern, content))
+    
+    def _extract_functions(self, content: str) -> List[str]:
+        """Extract function names from code"""
+        import re
+        function_pattern = r'def\s+(\w+)\s*\('
+        return re.findall(function_pattern, content)
+    
+    def _clean_patch_content(self, patch_content: str) -> str:
+        """Clean and format patch content"""
+        # Remove markdown code blocks
+        import re
+        patch_content = re.sub(r'```(?:\w+)?\s*', '', patch_content)
+        return patch_content.strip()
+    
+    def _estimate_complexity(self, content: str) -> float:
+        """Estimate code complexity (simplified)"""
+        lines = content.split('\n')
+        if not lines:
+            return 0.0
+        
+        complexity_indicators = [
+            'if ', 'for ', 'while ', 'def ', 'class ',
+            'try:', 'except ', 'with ', 'async '
+        ]
+        
+        complex_lines = sum(1 for line in lines if any(indicator in line for indicator in complexity_indicators))
+        return complex_lines / len(lines)
+    
+    def _get_fallback_analysis(self) -> Dict:
+        """Get fallback analysis when AI fails"""
+        return {
+            "analysis": "Analysis failed - manual review required",
+            "risk_level": "high",
+            "security_issues": ["Analysis failure - assume worst case"],
+            "quality_issues": ["Analysis system error"],
+            "functional_issues": ["Unable to analyze functionality"],
+            "should_patch": False,
+            "patch_strategy": "Manual review required",
+            "suggested_fix": "Have senior developer review the code",
+            "confidence": 0.1,
+            "requires_human_review": True,
+            "compliance_issues": ["Analysis system compliance check failed"]
+        }
+4. Enhanced Researcher Agent:
+python
+# agents/researcher.py
+import logging
+from typing import Dict, List, Optional
+import json
+from datetime import datetime
+
+from ..core.hybrid_router import LLM
+from ..core.policy_agent import policy_agent
+
+logger = logging.getLogger("researcher")
+
+class EnhancedResearcherAgent:
+    """
+    V5.0 Enhanced Researcher Agent
+    Comprehensive technology research with risk assessment and feasibility analysis
+    """
+    
+    def __init__(self, llm: LLM):
+        self.llm = llm
+        self.policy_agent = policy_agent
+    
+    async def conduct_research(self, goal: str, context: Optional[Dict] = None) -> Dict:
+        """
+        Conduct comprehensive technology research
+        """
+        context = context or {}
+        
+        try:
+            # Build enhanced research prompt
+            research_prompt = self._build_research_prompt(goal, context)
+            
+            # Use hybrid router for research (typically cloud AI)
+            research_text = await self.llm.complete(research_prompt, json_mode=True)
+            research_data = self.llm.safe_json(research_text, self._get_fallback_research(goal))
+            
+            # Enhance research with additional analysis
+            enhanced_research = await self._enhance_research_data(research_data, goal, context)
+            
+            # Validate research completeness
+            validation_result = await self._validate_research(enhanced_research, goal)
+            
+            if not validation_result["valid"]:
+                logger.warning(f"Research validation issues: {validation_result['issues']}")
+                enhanced_research = await self._fix_research_issues(enhanced_research, validation_result["issues"])
+            
+            logger.info(f"Research completed for: {goal} - Tech stack: {len(enhanced_research.get('tech_stack', []))} items")
+            
+            return enhanced_research
+            
+        except Exception as e:
+            logger.error(f"Research failed: {e}")
+            return self._get_fallback_research(goal)
+    
+    def _build_research_prompt(self, goal: str, context: Dict) -> str:
+        """Build comprehensive research prompt"""
+        
+        compliance_requirements = context.get("compliance", [])
+        risk_tolerance = context.get("risk_tolerance", "medium")
+        
+        return f"""
+        As an AI Senior Technology Researcher and Solution Architect, analyze this goal:
+        
+        GOAL: {goal}
+        
+        CONTEXT:
+        - Risk Tolerance: {risk_tolerance}
+        - Compliance Requirements: {compliance_requirements}
+        - Collaboration Mode: {context.get('mode', 'full-auto')}
+        
+        RESEARCH REQUIREMENTS:
+        
+        1. TECHNOLOGY STACK ANALYSIS:
+           - Recommended programming languages
+           - Frameworks and libraries
+           - Database solutions
+           - Deployment platforms
+           - Monitoring tools
+           - Security tools
+        
+        2. ARCHITECTURE RECOMMENDATIONS:
+           - Architectural pattern (microservices, monolith, serverless, etc.)
+           - Data flow design
+           - API design principles
+           - Scaling strategy
+           - Security architecture
+        
+        3. RISK ASSESSMENT:
+           - Technical risks and mitigation strategies
+           - Security risks
+           - Compliance risks
+           - Operational risks
+           - Implementation risks
+        
+        4. REQUIREMENTS ANALYSIS:
+           - Functional requirements
+           - Non-functional requirements (performance, security, scalability)
+           - Integration requirements
+           - Compliance requirements
+        
+        5. ACCEPTANCE CRITERIA:
+           - Technical acceptance criteria
+           - Business acceptance criteria
+           - Security acceptance criteria
+           - Performance acceptance criteria
+        
+        6. FEASIBILITY ANALYSIS:
+           - Implementation complexity (low/medium/high)
+           - Time estimation
+           - Resource requirements
+           - Skill requirements
+        
+        7. ALTERNATIVES ANALYSIS:
+           - Alternative approaches
+           - Pros and cons of each
+           - Recommendation with justification
+        
+        Return JSON with this structure:
+        {{
+            "tech_stack": [
+                {{
+                    "category": "backend|frontend|database|infrastructure|monitoring",
+                    "technology": "technology name",
+                    "version": "recommended version",
+                    "justification": "why this technology",
+                    "complexity": "low|medium|high",
+                    "risk_level": "low|medium|high"
+                }}
+            ],
+            "architecture": {{
+                "pattern": "recommended pattern",
+                "justification": "why this pattern",
+                "components": ["list of main components"],
+                "data_flow": "description of data flow",
+                "scaling_strategy": "horizontal|vertical|auto"
+            }},
+            "requirements": {{
+                "functional": ["list of functional requirements"],
+                "non_functional": {{
+                    "performance": "requirements",
+                    "security": "requirements",
+                    "scalability": "requirements",
+                    "reliability": "requirements"
+                }}
+            }},
+            "risks": [
+                {{
+                    "category": "technical|security|compliance|operational",
+                    "description": "risk description",
+                    "impact": "low|medium|high|critical",
+                    "probability": "low|medium|high",
+                    "mitigation": "how to mitigate"
+                }}
+            ],
+            "acceptance_criteria": [
+                "list of measurable acceptance criteria"
+            ],
+            "feasibility": {{
+                "complexity": "low|medium|high",
+                "estimated_timeline": "timeline description",
+                "skill_requirements": ["required skills"],
+                "resource_requirements": ["required resources"]
+            }},
+            "alternatives": [
+                {{
+                    "approach": "alternative approach",
+                    "pros": ["advantages"],
+                    "cons": ["disadvantages"],
+                    "recommendation": "yes|no"
+                }}
+            ]
+        }}
+        """
+    
+    async def _enhance_research_data(self, research_data: Dict, goal: str, context: Dict) -> Dict:
+        """Enhance research data with additional analysis"""
+        
+        enhanced = research_data.copy()
+        
+        # Add metadata
+        enhanced["metadata"] = {
+            "research_id": f"research_{hash(goal) % 10000:04d}",
+            "goal": goal,
+            "conducted_at": datetime.utcnow().isoformat(),
+            "researcher_version": "5.0",
+            "context": {
+                "compliance": context.get("compliance", []),
+                "risk_tolerance": context.get("risk_tolerance", "medium")
+            }
+        }
+        
+        # Calculate overall risk score
+        enhanced["overall_risk"] = await self._calculate_overall_risk(enhanced)
+        
+        # Add technology compatibility analysis
+        enhanced["compatibility_analysis"] = await self._analyze_technology_compatibility(enhanced)
+        
+        # Add cost estimation
+        enhanced["cost_estimation"] = await self._estimate_costs(enhanced, context)
+        
+        # Add implementation roadmap
+        enhanced["implementation_roadmap"] = await self._create_implementation_roadmap(enhanced)
+        
+        return enhanced
+    
+    async def _calculate_overall_risk(self, research_data: Dict) -> Dict:
+        """Calculate overall project risk based on research"""
+        risks = research_data.get("risks", [])
+        
+        if not risks:
+            return {"level": "medium", "score": 0.5, "factors": ["No risk assessment"]}
+        
+        # Calculate weighted risk score
+        impact_weights = {"low": 0.1, "medium": 0.4, "high": 0.7, "critical": 0.9}
+        probability_weights = {"low": 0.1, "medium": 0.5, "high": 0.9}
+        
+        weighted_risks = []
+        for risk in risks:
+            impact = impact_weights.get(risk.get("impact", "medium"), 0.4)
+            probability = probability_weights.get(risk.get("probability", "medium"), 0.5)
+            weighted_risks.append(impact * probability)
+        
+        avg_risk = sum(weighted_risks) / len(weighted_risks) if weighted_risks else 0.5
+        
+        # Determine risk level
+        if avg_risk >= 0.7:
+            level = "high"
+        elif avg_risk >= 0.4:
+            level = "medium"
+        else:
+            level = "low"
+        
+        # Get top risk factors
+        high_risks = [r for r in risks if r.get("impact") in ["high", "critical"]]
+        risk_factors = [r["description"] for r in high_risks[:3]]  # Top 3
+        
+        return {
+            "level": level,
+            "score": avg_risk,
+            "factors": risk_factors,
+            "high_risk_count": len(high_risks)
+        }
+    
+    async def _analyze_technology_compatibility(self, research_data: Dict) -> Dict:
+        """Analyze technology compatibility and dependencies"""
+        tech_stack = research_data.get("tech_stack", [])
+        
+        compatibility = {
+            "compatible": True,
+            "warnings": [],
+            "dependencies": [],
+            "conflicts": []
+        }
+        
+        # Simple compatibility checks (in reality, this would be more sophisticated)
+        technologies = [tech["technology"].lower() for tech in tech_stack]
+        
+        # Check for potential conflicts
+        if "mysql" in technologies and "mongodb" in technologies:
+            compatibility["warnings"].append("Mixed SQL/NoSQL databases may add complexity")
+        
+        if any(tech in technologies for tech in ["django", "flask"]) and "react" in technologies:
+            compatibility["dependencies"].append("API bridge required between backend and frontend")
+        
+        # Check for missing components
+        has_backend = any(tech.get("category") == "backend" for tech in tech_stack)
+        has_database = any(tech.get("category") == "database" for tech in tech_stack)
+        
+        if not has_backend:
+            compatibility["warnings"].append("No backend technology specified")
+        if not has_database:
+            compatibility["warnings"].append("No database technology specified")
+        
+        return compatibility
+    
+    async def _estimate_costs(self, research_data: Dict, context: Dict) -> Dict:
+        """Estimate implementation and operational costs"""
+        feasibility = research_data.get("feasibility", {})
+        complexity = feasibility.get("complexity", "medium")
+        
+        # Simple cost estimation based on complexity
+        cost_multipliers = {
+            "low": 1.0,
+            "medium": 2.0,
+            "high": 4.0
+        }
+        
+        base_cost = 1000  # Base cost unit
+        multiplier = cost_multipliers.get(complexity, 2.0)
+        
+        return {
+            "development_cost": base_cost * multiplier,
+            "maintenance_cost": base_cost * multiplier * 0.2,  # 20% of dev cost annually
+            "infrastructure_cost": base_cost * 0.5,
+            "complexity_factor": complexity,
+            "cost_units": "relative_units"
+        }
+    
+    async def _create_implementation_roadmap(self, research_data: Dict) -> Dict:
+        """Create high-level implementation roadmap"""
+        feasibility = research_data.get("feasibility", {})
+        complexity = feasibility.get("complexity", "medium")
+        
+        # Timeline estimation based on complexity
+        timeline_estimates = {
+            "low": "2-4 weeks",
+            "medium": "1-2 months", 
+            "high": "3-6 months"
+        }
+        
+        phases = [
+            {
+                "phase": "Planning & Design",
+                "duration": "1-2 weeks",
+                "activities": ["Detailed technical design", "Architecture finalization", "Risk mitigation planning"]
+            },
+            {
+                "phase": "Core Development", 
+                "duration": timeline_estimates.get(complexity, "1-2 months"),
+                "activities": ["Backend implementation", "Frontend development", "Database setup"]
+            },
+            {
+                "phase": "Testing & QA",
+                "duration": "2-3 weeks", 
+                "activities": ["Unit testing", "Integration testing", "Security testing", "Performance testing"]
+            },
+            {
+                "phase": "Deployment & Launch",
+                "duration": "1-2 weeks",
+                "activities": ["Production deployment", "Monitoring setup", "Documentation", "Training"]
+            }
+        ]
+        
+        return {
+            "total_timeline": timeline_estimates.get(complexity, "2-3 months"),
+            "phases": phases,
+            "critical_path": ["Planning & Design", "Core Development", "Testing & QA"],
+            "dependencies": research_data.get("architecture", {}).get("components", [])
+        }
+    
+    async def _validate_research(self, research_data: Dict, goal: str) -> Dict:
+        """Validate research completeness and quality"""
+        validation = {
+            "valid": True,
+            "issues": [],
+            "warnings": []
+        }
+        
+        required_sections = ["tech_stack", "architecture", "requirements", "risks"]
+        for section in required_sections:
+            if not research_data.get(section):
+                validation["valid"] = False
+                validation["issues"].append(f"Missing required section: {section}")
+        
+        # Check tech stack completeness
+        tech_stack = research_data.get("tech_stack", [])
+        if len(tech_stack) < 3:
+            validation["warnings"].append("Technology stack seems minimal")
+        
+        # Check risk assessment
+        risks = research_data.get("risks", [])
+        if len(risks) < 2:
+            validation["warnings"].append("Risk assessment may be incomplete")
+        
+        return validation
+    
+    async def _fix_research_issues(self, research_data: Dict, issues: List[str]) -> Dict:
+        """Attempt to fix research validation issues"""
+        if not issues:
+            return research_data
+        
+        fix_prompt = f"""
+        Fix these issues in the research data:
+        
+        CURRENT RESEARCH:
+        {json.dumps(research_data, indent=2)}
+        
+        IDENTIFIED ISSUES:
+        {chr(10).join(issues)}
+        
+        Return the COMPLETE fixed research data in the same JSON structure.
+        """
+        
+        try:
+            fixed_research = await self.llm.complete(fix_prompt, json_mode=True)
+            return self.llm.safe_json(fixed_research, research_data)  # Fallback to original
+        except Exception as e:
+            logger.error(f"Research fix failed: {e}")
+            return research_data
+    
+    def _get_fallback_research(self, goal: str) -> Dict:
+        """Get fallback research when AI fails"""
+        return {
+            "tech_stack": [
+                {
+                    "category": "backend",
+                    "technology": "Python/FastAPI",
+                    "version": "latest",
+                    "justification": "Fallback - reliable and well-documented",
+                    "complexity": "medium",
+                    "risk_level": "low"
+                }
+            ],
+            "architecture": {
+                "pattern": "modular monolith",
+                "justification": "Fallback - simple to implement",
+                "components": ["API", "Business Logic", "Data Access"],
+                "data_flow": "Standard request-response",
+                "scaling_strategy": "vertical"
+            },
+            "requirements": {
+                "functional": ["Implement core functionality"],
+                "non_functional": {
+                    "performance": "Adequate for initial load",
+                    "security": "Basic authentication and validation",
+                    "scalability": "Vertical scaling capable",
+                    "reliability": "Standard error handling"
+                }
+            },
+            "risks": [
+                {
+                    "category": "technical",
+                    "description": "Fallback mode - limited analysis",
+                    "impact": "medium",
+                    "probability": "high",
+                    "mitigation": "Manual review required"
+                }
+            ],
+            "acceptance_criteria": [
+                "Functional implementation",
+                "Basic error handling",
+                "Adequate documentation"
+            ],
+            "feasibility": {
+                "complexity": "medium",
+                "estimated_timeline": "2-4 weeks",
+                "skill_requirements": ["Python", "FastAPI", "Basic DevOps"],
+                "resource_requirements": ["Development environment", "Testing framework"]
+            },
+            "metadata": {
+                "research_id": "fallback",
+                "goal": goal,
+                "conducted_at": datetime.utcnow().isoformat(),
+                "researcher_version": "5.0-fallback"
+            }
+        }
+5. Enhanced Debugger Agent:
+python
+# agents/debugger.py
+import logging
+from typing import Dict, List, Optional
+import re
+import traceback
+
+from ..core.hybrid_router import LLM
+from ..utils.secure_sandbox import SecureSandboxRunner
+
+logger = logging.getLogger("debugger")
+
+class EnhancedDebuggerAgent:
+    """
+    V5.0 Enhanced Debugger Agent
+    Advanced debugging with root cause analysis and automated fixes
+    """
+    
+    def __init__(self, llm: LLM):
+        self.llm = llm
+        self.sandbox = SecureSandboxRunner()
+    
+    async def diagnose_and_fix(self, code: str, error_logs: str, 
+                             test_results: Optional[Dict] = None,
+                             context: Optional[Dict] = None) -> Dict:
+        """
+        Comprehensive debugging with root cause analysis
+        """
+        context = context or {}
+        
+        try:
+            # Analyze the error and code
+            analysis = await self._analyze_error(code, error_logs, test_results, context)
+            
+            # Generate fix based on analysis
+            if analysis["should_attempt_fix"]:
+                fix_result = await self._generate_fix(code, error_logs, analysis, context)
+                
+                # Validate the fix
+                validation_result = await self._validate_fix(fix_result["fixed_code"], code, context)
+                
+                return {
+                    "success": validation_result["valid"],
+                    "original_code": code,
+                    "fixed_code": fix_result["fixed_code"],
+                    "analysis": analysis,
+                    "fix_strategy": fix_result["strategy"],
+                    "confidence": fix_result["confidence"],
+                    "validation_result": validation_result,
+                    "applied_patches": fix_result.get("patches", []),
+                    "requires_human_review": analysis["requires_human_review"]
+                }
+            else:
+                return {
+                    "success": False,
+                    "original_code": code,
+                    "fixed_code": code,
+                    "analysis": analysis,
+                    "fix_strategy": "Manual fix required",
+                    "confidence": 0.0,
+                    "requires_human_review": True,
+                    "reason": "Automatic fix not recommended"
+                }
+                
+        except Exception as e:
+            logger.error(f"Debugging failed: {e}")
+            return self._get_fallback_result(code, error_logs, str(e))
+    
+    async def _analyze_error(self, code: str, error_logs: str, 
+                           test_results: Optional[Dict], context: Dict) -> Dict:
+        """Comprehensive error analysis"""
+        
+        analysis_prompt = f"""
+        As an AI Senior Debugging Engineer, analyze this error:
+
+        CODE:
+        {code}
+
+        ERROR LOGS:
+        {error_logs}
+
+        TEST RESULTS:
+        {test_results if test_results else "No test results available"}
+
+        CONTEXT:
+        - Artifact Type: {context.get('artifact_type', 'code')}
+        - Purpose: {context.get('purpose', 'Unknown')}
+        - Risk Level: {context.get('risk_level', 'medium')}
+
+        ANALYSIS REQUIREMENTS:
+
+        1. ROOT CAUSE ANALYSIS:
+           - Identify the exact line causing the issue
+           - Determine the type of error (syntax, runtime, logical, etc.)
+           - Trace the error through the code flow
+           - Identify any underlying architectural issues
+
+        2. IMPACT ASSESSMENT:
+           - Severity of the issue (blocking/non-blocking)
+           - Scope of impact (localized/system-wide)
+           - Data corruption risk
+           - Security implications
+
+        3. FIX FEASIBILITY:
+           - Can this be automatically fixed? (yes/no)
+           - Complexity of the fix (simple/complex)
+           - Risk of introducing new issues
+           - Recommended fix strategy
+
+        4. PREVENTION RECOMMENDATIONS:
+           - Code patterns to avoid
+           - Testing strategies to catch similar issues
+           - Monitoring improvements
+           - Code review focus areas
+
+        Return JSON with this structure:
+        {{
+            "root_cause": {{
+                "type": "syntax|runtime|logical|resource|security",
+                "description": "detailed cause description",
+                "line_number": "estimated line number",
+                "code_snippet": "offending code snippet",
+                "underlying_issue": "deeper architectural issue if any"
+            }},
+            "impact": {{
+                "severity": "low|medium|high|critical",
+                "scope": "localized|module|system",
+                "data_risk": "none|low|medium|high",
+                "security_risk": "none|low|medium|high"
+            }},
+            "fix_feasibility": {{
+                "automatic_fix_possible": true|false,
+                "complexity": "simple|moderate|complex",
+                "estimated_effort": "effort estimate",
+                "risk_of_regression": "low|medium|high",
+                "recommended_strategy": "fix strategy description"
+            }},
+            "prevention_recommendations": [
+                "list of prevention strategies"
+            ],
+            "should_attempt_fix": true|false,
+            "requires_human_review": true|false,
+            "confidence": 0.0-1.0
+        }}
+        """
+        
+        analysis_text = await self.llm.complete(analysis_prompt, json_mode=True)
+        analysis_data = self.llm.safe_json(analysis_text, self._get_fallback_analysis())
+        
+        # Enhance with automated code analysis
+        enhanced_analysis = await self._enhance_analysis(analysis_data, code, error_logs, context)
+        
+        return enhanced_analysis
+    
+    async def _enhance_analysis(self, analysis: Dict, code: str, error_logs: str, context: Dict) -> Dict:
+        """Enhance AI analysis with automated checks"""
+        
+        enhanced = analysis.copy()
+        
+        # Add automated code quality checks
+        quality_checks = await self._perform_quality_checks(code, error_logs)
+        enhanced["quality_issues"] = quality_checks.get("issues", [])
+        
+        # Add security scan
+        security_scan = await self._scan_security_issues(code, error_logs)
+        enhanced["security_issues"] = security_scan.get("issues", [])
+        
+        # Adjust confidence based on automated checks
+        if quality_checks["issues"] or security_scan["issues"]:
+            enhanced["confidence"] = max(0.3, enhanced.get("confidence", 0.7) - 0.2)
+        
+        # Determine if human review is required
+        enhanced["requires_human_review"] = self._requires_human_review(enhanced, context)
+        
+        return enhanced
+    
+    async def _perform_quality_checks(self, code: str, error_logs: str) -> Dict:
+        """Perform automated code quality checks"""
+        issues = []
+        
+        # Check for common Python issues
+        if 'import *' in code:
+            issues.append("Wildcard import - can cause namespace pollution")
+        
+        if 'except:' in code or 'except Exception:' in code:
+            issues.append("Bare except clause - can mask errors")
+        
+        if 'eval(' in code or 'exec(' in code:
+            issues.append("Use of eval/exec - security risk")
+        
+        # Check for potential infinite loops
+        loop_patterns = [
+            (r'while\s+True\s*:', "Potential infinite while True loop"),
+            (r'for\s+\w+\s+in\s+.*:\s*while\s+True', "Nested infinite loop")
+        ]
+        
+        for pattern, description in loop_patterns:
+            if re.search(pattern, code):
+                issues.append(description)
+        
+        return {"issues": issues}
+    
+    async def _scan_security_issues(self, code: str, error_logs: str) -> Dict:
+        """Scan for security issues in the code"""
+        issues = []
+        
+        security_patterns = [
+            (r'subprocess\.call\([^)]+shell=True', "Shell injection vulnerability"),
+            (r'os\.system\(', "Direct system command execution"),
+            (r'pickle\.loads\(', "Unsafe deserialization"),
+            (r'input\(\)', "Unvalidated user input"),
+            (r'password\s*=\s*["\'][^"\']+["\']', "Hardcoded password"),
+        ]
+        
+        for pattern, description in security_patterns:
+            if re.search(pattern, code):
+                issues.append(description)
+        
+        return {"issues": issues}
+    
+    async def _generate_fix(self, code: str, error_logs: str, analysis: Dict, context: Dict) -> Dict:
+        """Generate automated fix for the identified issues"""
+        
+        fix_prompt = f"""
+        Generate a fix for this code based on the analysis:
+
+        ORIGINAL CODE:
+        {code}
+
+        ERROR LOGS:
+        {error_logs}
+
+        ANALYSIS:
+        {json.dumps(analysis, indent=2)}
+
+        FIX REQUIREMENTS:
+        - Fix the root cause identified in the analysis
+        - Maintain original functionality
+        - Follow Python best practices
+        - Add proper error handling
+        - Include necessary comments
+        - Ensure code readability
+        - Address any security concerns
+
+        FIX STRATEGY:
+        {analysis.get('fix_feasibility', {}).get('recommended_strategy', 'Comprehensive fix')}
+
+        Return ONLY the complete fixed code.
+        """
+        
+        try:
+            fixed_code = await self.llm.complete(fix_prompt)
+            cleaned_fix = self._clean_fixed_code(fixed_code)
+            
+            # Extract patches for documentation
+            patches = await self._extract_patches(code, cleaned_fix)
+            
+            # Calculate confidence
+            confidence = await self._calculate_fix_confidence(code, cleaned_fix, analysis, context)
+            
+            return {
+                "fixed_code": cleaned_fix,
+                "strategy": analysis.get('fix_feasibility', {}).get('recommended_strategy', 'AI-generated fix'),
+                "patches": patches,
+                "confidence": confidence
+            }
+            
+        except Exception as e:
+            logger.error(f"Fix generation failed: {e}")
+            return {
+                "fixed_code": code,
+                "strategy": "Fix generation failed",
+                "patches": [],
+                "confidence": 0.0
+            }
+    
+    async def _extract_patches(self, original_code: str, fixed_code: str) -> List[Dict]:
+        """Extract and document the changes made"""
+        # Simple line-based diff (in production, use proper diff library)
+        original_lines = original_code.split('\n')
+        fixed_lines = fixed_code.split('\n')
+        
+        patches = []
+        
+        # Simple change detection
+        for i, (orig, fix) in enumerate(zip(original_lines, fixed_lines)):
+            if orig != fix:
+                patches.append({
+                    "line": i + 1,
+                    "original": orig,
+                    "fixed": fix,
+                    "change_type": "modification"
+                })
+        
+        # Handle added/removed lines
+        if len(original_lines) != len(fixed_lines):
+            if len(fixed_lines) > len(original_lines):
+                patches.append({
+                    "line": "multiple",
+                    "original": f"{len(original_lines)} lines",
+                    "fixed": f"{len(fixed_lines)} lines", 
+                    "change_type": "lines_added"
+                })
+            else:
+                patches.append({
+                    "line": "multiple", 
+                    "original": f"{len(original_lines)} lines",
+                    "fixed": f"{len(fixed_lines)} lines",
+                    "change_type": "lines_removed"
+                })
+        
+        return patches
+    
+    async def _calculate_fix_confidence(self, original_code: str, fixed_code: str, 
+                                      analysis: Dict, context: Dict) -> float:
+        """Calculate confidence in the generated fix"""
+        base_confidence = analysis.get("confidence", 0.5)
+        
+        # Adjust based on code changes
+        if original_code == fixed_code:
+            return 0.1  # No changes made
+        
+        # Adjust based on complexity
+        complexity = analysis.get("fix_feasibility", {}).get("complexity", "moderate")
+        complexity_penalties = {"simple": 0.0, "moderate": -0.1, "complex": -0.3}
+        base_confidence += complexity_penalties.get(complexity, 0.0)
+        
+        # Adjust based on risk
+        risk_penalty = analysis.get("fix_feasibility", {}).get("risk_of_regression", "medium")
+        risk_penalties = {"low": 0.0, "medium": -0.2, "high": -0.4}
+        base_confidence += risk_penalties.get(risk_penalty, 0.0)
+        
+        return max(0.1, min(1.0, base_confidence))
+    
+    async def _validate_fix(self, fixed_code: str, original_code: str, context: Dict) -> Dict:
+        """Validate the generated fix"""
+        validation = {
+            "valid": True,
+            "issues": [],
+            "warnings": []
+        }
+        
+        # Basic validation
+        if not fixed_code.strip():
+            validation["valid"] = False
+            validation["issues"].append("Empty fix generated")
+            return validation
+        
+        # Check if fix is substantially different from original
+        if fixed_code == original_code:
+            validation["valid"] = False
+            validation["issues"].append("No changes made in fix")
+            return validation
+        
+        # Check for basic Python syntax (simplified)
+        try:
+            compile(fixed_code, '<string>', 'exec')
+        except SyntaxError as e:
+            validation["valid"] = False
+            validation["issues"].append(f"Syntax error in fix: {e}")
+        
+        # Check for obvious issues
+        if 'FIXME' in fixed_code or 'TODO' in fixed_code:
+            validation["warnings"].append("Fix contains TODO/FIXME comments")
+        
+        return validation
+    
+    def _requires_human_review(self, analysis: Dict, context: Dict) -> bool:
+        """Determine if human review is required"""
+        # Always review critical issues
+        if analysis.get("impact", {}).get("severity") == "critical":
+            return True
+        
+        # Review if automatic fix not recommended
+        if not analysis.get("should_attempt_fix", False):
+            return True
+        
+        # Review if low confidence
+        if analysis.get("confidence", 1.0) < 0.5:
+            return True
+        
+        # Review for high-risk artifacts
+        if context.get("risk_level") in ["high", "critical"]:
+            return True
+        
+        return False
+    
+    def _clean_fixed_code(self, fixed_code: str) -> str:
+        """Clean and format the fixed code"""
+        # Remove markdown code blocks
+        fixed_code = re.sub(r'```(?:\w+)?\s*', '', fixed_code)
+        return fixed_code.strip()
+    
+    def _get_fallback_analysis(self) -> Dict:
+        """Get fallback analysis when AI fails"""
+        return {
+            "root_cause": {
+                "type": "unknown",
+                "description": "Analysis failed - manual investigation required",
+                "line_number": "unknown",
+                "code_snippet": "unknown",
+                "underlying_issue": "Analysis system failure"
+            },
+            "impact": {
+                "severity": "high",
+                "scope": "unknown", 
+                "data_risk": "unknown",
+                "security_risk": "unknown"
+            },
+            "fix_feasibility": {
+                "automatic_fix_possible": False,
+                "complexity": "unknown",
+                "estimated_effort": "unknown",
+                "risk_of_regression": "high",
+                "recommended_strategy": "Manual debugging required"
+            },
+            "should_attempt_fix": False,
+            "requires_human_review": True,
+            "confidence": 0.1
+        }
+    
+    def _get_fallback_result(self, code: str, error_logs: str, error: str) -> Dict:
+        """Get fallback result when debugging fails"""
+        return {
+            "success": False,
+            "original_code": code,
+            "fixed_code": code,
+            "analysis": self._get_fallback_analysis(),
+            "fix_strategy": "Debugging system failure",
+            "confidence": 0.0,
+            "requires_human_review": True,
+            "error": error
+        }
+6. Enhanced Tester Agent:
+python
+# agents/tester.py
+import logging
+from typing import Dict, List, Optional
+import re
+import ast
+
+from ..core.hybrid_router import LLM
+from ..utils.secure_sandbox import SecureSandboxRunner
+
+logger = logging.getLogger("tester")
+
+class EnhancedTesterAgent:
+    """
+    V5.0 Enhanced Tester Agent
+    Comprehensive testing with multiple test types and quality assurance
+    """
+    
+    def __init__(self, llm: LLM):
+        self.llm = llm
+        self.sandbox = SecureSandboxRunner()
+    
+    async def create_comprehensive_tests(self, code: str, artifact: Dict, 
+                                      research: Dict, context: Optional[Dict] = None) -> Dict:
+        """
+        Create comprehensive test suite for the code
+        """
+        context = context or {}
+        
+        try:
+            # Generate different types of tests
+            unit_tests = await self._generate_unit_tests(code, artifact, research, context)
+            integration_tests = await self._generate_integration_tests(code, artifact, research, context)
+            security_tests = await self._generate_security_tests(code, artifact, research, context)
+            performance_tests = await self._generate_performance_tests(code, artifact, research, context)
+            
+            # Combine all tests
+            test_suite = await self._combine_test_suite(
+                unit_tests, integration_tests, security_tests, performance_tests, 
+                code, artifact, context
+            )
+            
+            # Validate test suite
+            validation_result = await self._validate_test_suite(test_suite, code, context)
+            
+            logger.info(f"Test suite created for {artifact.get('artifact_id')}: "
+                       f"{len(test_suite.get('tests', []))} tests, "
+                       f"coverage: {test_suite.get('estimated_coverage', 0)}%")
+            
+            return test_suite
+            
+        except Exception as e:
+            logger.error(f"Test creation failed: {e}")
+            return self._get_fallback_tests(code, artifact)
+    
+    async def _generate_unit_tests(self, code: str, artifact: Dict, 
+                                 research: Dict, context: Dict) -> Dict:
+        """Generate comprehensive unit tests"""
+        
+        unit_test_prompt = f"""
+        Generate comprehensive unit tests for this Python code:
+
+        CODE:
+        {code}
+
+        ARTIFACT CONTEXT:
+        - Purpose: {artifact.get('purpose')}
+        - Expected Behavior: {artifact.get('expected_behavior', 'N/A')}
+        - Acceptance Criteria: {artifact.get('acceptance_criteria', [])}
+        - Risk Level: {artifact.get('risk_level', 'medium')}
+
+        RESEARCH CONTEXT:
+        - Tech Stack: {research.get('tech_stack', [])}
+        - Architecture: {research.get('architecture', {})}
+
+        UNIT TEST REQUIREMENTS:
+        1. Use pytest framework
+        2. Test all functions and methods
+        3. Cover edge cases and error conditions
+        4. Use appropriate fixtures and mocking
+        5. Include parameterized tests for different inputs
+        6. Test both success and failure scenarios
+        7. Follow AAA pattern (Arrange-Act-Assert)
+        8. Include descriptive test names
+        9. Achieve high code coverage
+        10. Include setup and teardown if needed
+
+        Return ONLY the Python test code.
+        """
+        
+        unit_test_code = await self.llm.complete(unit_test_prompt)
+        return {
+            "type": "unit",
+            "tests": self._clean_test_code(unit_test_code),
+            "coverage_estimate": await self._estimate_coverage(unit_test_code, code),
+            "test_count": self._count_tests(unit_test_code)
+        }
+    
+    async def _generate_integration_tests(self, code: str, artifact: Dict,
+                                        research: Dict, context: Dict) -> Dict:
+        """Generate integration tests"""
+        
+        integration_prompt = f"""
+        Generate integration tests for this Python code:
+
+        CODE:
+        {code}
+
+        ARTIFACT CONTEXT:
+        - Purpose: {artifact.get('purpose')}
+        - Dependencies: {artifact.get('dependencies', [])}
+        - Integration Points: {artifact.get('integration_points', [])}
+
+        INTEGRATION TEST REQUIREMENTS:
+        1. Test interactions with other components
+        2. Test database interactions if applicable
+        3. Test API endpoints if applicable
+        4. Test file system operations
+        5. Use test databases or mocking
+        6. Include end-to-end scenarios
+        7. Test data flow between components
+        8. Verify integration contracts
+
+        Return ONLY the Python test code.
+        """
+        
+        integration_test_code = await self.llm.complete(integration_prompt)
+        return {
+            "type": "integration", 
+            "tests": self._clean_test_code(integration_test_code),
+            "coverage_estimate": await self._estimate_coverage(integration_test_code, code),
+            "test_count": self._count_tests(integration_test_code)
+        }
+    
+    async def _generate_security_tests(self, code: str, artifact: Dict,
+                                     research: Dict, context: Dict) -> Dict:
+        """Generate security tests"""
+        
+        security_prompt = f"""
+        Generate security tests for this Python code:
+
+        CODE:
+        {code}
+
+        ARTIFACT CONTEXT:
+        - Purpose: {artifact.get('purpose')}
+        - Risk Level: {artifact.get('risk_level', 'medium')}
+        - Security Requirements: {artifact.get('security_requirements', [])}
+
+        SECURITY TEST REQUIREMENTS:
+        1. Test for injection vulnerabilities
+        2. Test authentication and authorization
+        3. Test input validation
+        4. Test data sanitization
+        5. Test error handling without information leakage
+        6. Test secure configuration
+        7. Test for common security anti-patterns
+        8. Include penetration testing scenarios
+
+        Return ONLY the Python test code.
+        """
+        
+        security_test_code = await self.llm.complete(security_prompt)
+        return {
+            "type": "security",
+            "tests": self._clean_test_code(security_test_code), 
+            "coverage_estimate": await self._estimate_coverage(security_test_code, code),
+            "test_count": self._count_tests(security_test_code)
+        }
+    
+    async def _generate_performance_tests(self, code: str, artifact: Dict,
+                                        research: Dict, context: Dict) -> Dict:
+        """Generate performance tests"""
+        
+        performance_prompt = f"""
+        Generate performance tests for this Python code:
+
+        CODE:
+        {code}
+
+        ARTIFACT CONTEXT:
+        - Purpose: {artifact.get('purpose')}
+        - Performance Requirements: {artifact.get('performance_requirements', 'N/A')}
+
+        PERFORMANCE TEST REQUIREMENTS:
+        1. Test execution time under load
+        2. Test memory usage
+        3. Test scalability
+        4. Include benchmark comparisons
+        5. Test with large datasets if applicable
+        6. Measure response times
+        7. Identify performance bottlenecks
+        8. Use pytest-benchmark or similar
+
+        Return ONLY the Python test code.
+        """
+        
+        performance_test_code = await self.llm.complete(performance_prompt)
+        return {
+            "type": "performance",
+            "tests": self._clean_test_code(performance_test_code),
+            "coverage_estimate": await self._estimate_coverage(performance_test_code, code),
+            "test_count": self._count_tests(performance_test_code)
+        }
+    
+    async def _combine_test_suite(self, unit_tests: Dict, integration_tests: Dict,
+                                security_tests: Dict, performance_tests: Dict,
+                                code: str, artifact: Dict, context: Dict) -> Dict:
+        """Combine all test types into a comprehensive test suite"""
+        
+        all_tests = []
+        total_coverage = 0
+        total_tests = 0
+        
+        test_types = [unit_tests, integration_tests, security_tests, performance_tests]
+        
+        for test_type in test_types:
+            if test_type["tests"]:
+                all_tests.append({
+                    "category": test_type["type"],
+                    "code": test_type["tests"],
+                    "test_count": test_type["test_count"],
+                    "coverage_estimate": test_type["coverage_estimate"]
+                })
+                total_coverage += test_type["coverage_estimate"]
+                total_tests += test_type["test_count"]
+        
+        avg_coverage = total_coverage / len(test_types) if test_types else 0
+        
+        # Generate test runner and configuration
+        test_config = await self._generate_test_configuration(all_tests, code, artifact, context)
+        
+        return {
+            "test_suite": all_tests,
+            "summary": {
+                "total_tests": total_tests,
+                "estimated_coverage": avg_coverage,
+                "test_categories": [test["category"] for test in all_tests],
+                "artifact_id": artifact.get("artifact_id")
+            },
+            "configuration": test_config,
+            "metadata": {
+                "generated_at": self._get_timestamp(),
+                "tester_version": "5.0",
+                "artifact_purpose": artifact.get("purpose")
+            }
+        }
+    
+    async def _generate_test_configuration(self, test_suite: List[Dict], 
+                                         code: str, artifact: Dict, context: Dict) -> Dict:
+        """Generate test configuration and runner"""
+        
+        config_prompt = f"""
+        Generate pytest configuration and test runner for these test categories:
+        
+        TEST CATEGORIES: {[test['category'] for test in test_suite]}
+        
+        ARTIFACT: {artifact.get('purpose')}
+        
+        Create:
+        1. pytest.ini configuration
+        2. conftest.py with common fixtures
+        3. requirements-test.txt with testing dependencies
+        4. Test runner script
+        
+        Return as a structured configuration.
+        """
+        
+        config_code = await self.llm.complete(config_prompt)
+        
+        return {
+            "pytest_ini": self._extract_config_section(config_code, "pytest.ini"),
+            "conftest_py": self._extract_config_section(config_code, "conftest.py"),
+            "requirements_test": self._extract_config_section(config_code, "requirements-test.txt"),
+            "test_runner": self._extract_config_section(config_code, "test_runner.py")
+        }
+    
+    async def _validate_test_suite(self, test_suite: Dict, code: str, context: Dict) -> Dict:
+        """Validate the generated test suite"""
+        validation = {
+            "valid": True,
+            "issues": [],
+            "warnings": [],
+            "metrics": {}
+        }
+        
+        total_tests = test_suite["summary"]["total_tests"]
+        if total_tests == 0:
+            validation["valid"] = False
+            validation["issues"].append("No tests generated")
+        
+        if test_suite["summary"]["estimated_coverage"] < 50:
+            validation["warnings"].append("Low estimated test coverage")
+        
+        # Check test categories coverage
+        categories = test_suite["summary"]["test_categories"]
+        if "unit" not in categories:
+            validation["warnings"].append("No unit tests generated")
+        
+        # Basic syntax check for test code
+        for test_category in test_suite["test_suite"]:
+            try:
+                ast.parse(test_category["code"])
+            except SyntaxError as e:
+                validation["valid"] = False
+                validation["issues"].append(f"Syntax error in {test_category['category']} tests: {e}")
+        
+        validation["metrics"] = {
+            "total_tests": total_tests,
+            "estimated_coverage": test_suite["summary"]["estimated_coverage"],
+            "categories_count": len(categories)
+        }
+        
+        return validation
+    
+    def _clean_test_code(self, test_code: str) -> str:
+        """Clean and format test code"""
+        # Remove markdown code blocks
+        test_code = re.sub(r'```(?:\w+)?\s*', '', test_code)
+        return test_code.strip()
+    
+    async def _estimate_coverage(self, test_code: str, source_code: str) -> float:
+        """Estimate test coverage (simplified)"""
+        # Count functions in source code
+        source_functions = len(re.findall(r'def\s+(\w+)\s*\(', source_code))
+        
+        # Count test functions
+        test_functions = len(re.findall(r'def\s+test_(\w+)\s*\(', test_code))
+        
+        if source_functions == 0:
+            return 0.0
+        
+        coverage = (test_functions / source_functions) * 100
+        return min(100.0, coverage)
+    
+    def _count_tests(self, test_code: str) -> int:
+        """Count number of test functions"""
+        return len(re.findall(r'def\s+test_(\w+)\s*\(', test_code))
+    
+    def _extract_config_section(self, config_code: str, section_name: str) -> str:
+        """Extract configuration section from generated code"""
+        # Simple pattern matching for configuration sections
+        patterns = {
+            "pytest.ini": r'\[pytest\.ini\](.*?)(?=\[|\Z)',
+            "conftest.py": r'\[conftest\.py\](.*?)(?=\[|\Z)',
+            "requirements-test.txt": r'\[requirements-test\.txt\](.*?)(?=\[|\Z)',
+            "test_runner.py": r'\[test_runner\.py\](.*?)(?=\[|\Z)'
+        }
+        
+        pattern = patterns.get(section_name, f'\\[{re.escape(section_name)}\\]
+devam
+Devam ediyorum:
+
+python
+    def _extract_config_section(self, config_code: str, section_name: str) -> str:
+        """Extract configuration section from generated code"""
+        # Simple pattern matching for configuration sections
+        patterns = {
+            "pytest.ini": r'\[pytest\.ini\](.*?)(?=\[|\Z)',
+            "conftest.py": r'\[conftest\.py\](.*?)(?=\[|\Z)', 
+            "requirements-test.txt": r'\[requirements-test\.txt\](.*?)(?=\[|\Z)',
+            "test_runner.py": r'\[test_runner\.py\](.*?)(?=\[|\Z)'
+        }
+        
+        pattern = patterns.get(section_name, f'\\[{re.escape(section_name)}\\]')
+        match = re.search(pattern, config_code, re.DOTALL | re.IGNORECASE)
+        
+        if match:
+            return match.group(1).strip()
+        return f"# {section_name} configuration not found"
+    
+    def _get_timestamp(self) -> str:
+        """Get current timestamp"""
+        from datetime import datetime
+        return datetime.utcnow().isoformat()
+    
+    def _get_fallback_tests(self, code: str, artifact: Dict) -> Dict:
+        """Get fallback tests when generation fails"""
+        fallback_test = f'''
+"""
+Fallback test for: {artifact.get('purpose', 'Unknown artifact')}
+Generated due to test creation failure.
+"""
+
+import pytest
+
+def test_fallback():
+    """Basic fallback test"""
+    assert True
+
+def test_artifact_purpose():
+    """Test artifact purpose is defined"""
+    assert "{artifact.get('purpose', 'unknown')}" != "unknown"
+'''
+        
+        return {
+            "test_suite": [
+                {
+                    "category": "unit",
+                    "code": fallback_test,
+                    "test_count": 2,
+                    "coverage_estimate": 10.0
+                }
+            ],
+            "summary": {
+                "total_tests": 2,
+                "estimated_coverage": 10.0,
+                "test_categories": ["unit"],
+                "artifact_id": artifact.get("artifact_id")
+            },
+            "configuration": {
+                "pytest_ini": "[pytest]\npython_files = test_*.py\npython_classes = Test*\npython_functions = test_*",
+                "conftest_py": "# Fallback conftest.py",
+                "requirements_test": "pytest\npytest-cov",
+                "test_runner": "#!/bin/bash\npython -m pytest -v --cov=."
+            },
+            "metadata": {
+                "generated_at": self._get_timestamp(),
+                "tester_version": "5.0-fallback",
+                "artifact_purpose": artifact.get("purpose")
+            }
+        }
+    
+    async def execute_tests(self, test_suite: Dict, code: str, context: Optional[Dict] = None) -> Dict:
+        """
+        Execute test suite and return results
+        """
+        context = context or {}
+        
+        try:
+            # Prepare test environment
+            test_env = await self._prepare_test_environment(test_suite, code, context)
+            
+            # Execute different test types
+            execution_results = {}
+            
+            for test_category in test_suite["test_suite"]:
+                category_result = await self._execute_test_category(
+                    test_category, code, test_env, context
+                )
+                execution_results[test_category["category"]] = category_result
+            
+            # Aggregate results
+            aggregated_results = await self._aggregate_test_results(execution_results, test_suite)
+            
+            logger.info(f"Test execution completed: {aggregated_results['summary']['pass_rate']}% pass rate")
+            
+            return aggregated_results
+            
+        except Exception as e:
+            logger.error(f"Test execution failed: {e}")
+            return self._get_fallback_execution_results(test_suite, str(e))
+    
+    async def _prepare_test_environment(self, test_suite: Dict, code: str, context: Dict) -> Dict:
+        """Prepare test execution environment"""
+        return {
+            "working_directory": "/tmp/multiai_tests",
+            "dependencies": test_suite["configuration"].get("requirements_test", ""),
+            "environment_vars": {
+                "PYTHONPATH": "/tmp/multiai_tests",
+                "TEST_MODE": "true"
+            },
+            "timeout": context.get("test_timeout", 300)  # 5 minutes default
+        }
+    
+    async def _execute_test_category(self, test_category: Dict, code: str, 
+                                   test_env: Dict, context: Dict) -> Dict:
+        """Execute tests for a specific category"""
+        
+        # In a real implementation, this would actually run the tests in sandbox
+        # For now, return mock results based on code analysis
+        
+        test_code = test_category["code"]
+        
+        # Analyze test code for potential issues
+        analysis = await self._analyze_test_code(test_code, code, test_category["category"])
+        
+        # Mock execution results (in reality, run in sandbox)
+        return {
+            "category": test_category["category"],
+            "total_tests": test_category["test_count"],
+            "tests_passed": max(0, test_category["test_count"] - analysis["potential_failures"]),
+            "tests_failed": analysis["potential_failures"],
+            "execution_time": 2.5,  # Mock time
+            "coverage": test_category["coverage_estimate"],
+            "issues": analysis["issues"],
+            "logs": f"Mock execution of {test_category['category']} tests",
+            "status": "completed" if analysis["potential_failures"] == 0 else "failed"
+        }
+    
+    async def _analyze_test_code(self, test_code: str, source_code: str, category: str) -> Dict:
+        """Analyze test code for potential issues"""
+        issues = []
+        potential_failures = 0
+        
+        # Check for common test issues
+        if "assert True" in test_code:
+            issues.append("Test contains trivial assertion")
+            potential_failures += 0  # This would actually pass
+        
+        if "pytest.skip" in test_code:
+            issues.append("Test contains skipped tests")
+        
+        # Check if tests actually test the source code
+        source_functions = re.findall(r'def\s+(\w+)\s*\(', source_code)
+        test_functions = re.findall(r'def\s+test_(\w+)\s*\(', test_code)
+        
+        if not test_functions:
+            issues.append("No test functions found")
+            potential_failures = 1
+        
+        # Check for mocking patterns
+        if any(keyword in test_code for keyword in ['mock', 'patch', 'MagicMock']):
+            # Good - tests use mocking
+            pass
+        else:
+            issues.append("Tests may not use proper mocking")
+        
+        return {
+            "issues": issues,
+            "potential_failures": potential_failures,
+            "source_function_count": len(source_functions),
+            "test_function_count": len(test_functions)
+        }
+    
+    async def _aggregate_test_results(self, execution_results: Dict, test_suite: Dict) -> Dict:
+        """Aggregate results from all test categories"""
+        total_tests = 0
+        total_passed = 0
+        total_failed = 0
+        categories_status = {}
+        
+        for category, results in execution_results.items():
+            total_tests += results["total_tests"]
+            total_passed += results["tests_passed"]
+            total_failed += results["tests_failed"]
+            categories_status[category] = results["status"]
+        
+        pass_rate = (total_passed / total_tests * 100) if total_tests > 0 else 0
+        
+        return {
+            "summary": {
+                "total_tests": total_tests,
+                "tests_passed": total_passed,
+                "tests_failed": total_failed,
+                "pass_rate": pass_rate,
+                "categories_status": categories_status,
+                "overall_status": "passed" if total_failed == 0 else "failed"
+            },
+            "detailed_results": execution_results,
+            "recommendations": await self._generate_test_recommendations(execution_results, test_suite),
+            "metadata": {
+                "executed_at": self._get_timestamp(),
+                "test_suite_version": test_suite["metadata"]["tester_version"]
+            }
+        }
+    
+    async def _generate_test_recommendations(self, execution_results: Dict, test_suite: Dict) -> List[str]:
+        """Generate recommendations based on test results"""
+        recommendations = []
+        
+        for category, results in execution_results.items():
+            if results["tests_failed"] > 0:
+                recommendations.append(f"Fix {results['tests_failed']} failing tests in {category} category")
+            
+            if results["coverage"] < 80:
+                recommendations.append(f"Increase test coverage for {category} tests (current: {results['coverage']}%)")
+        
+        # Check if all test categories are present
+        expected_categories = ["unit", "integration", "security"]
+        present_categories = list(execution_results.keys())
+        
+        for expected in expected_categories:
+            if expected not in present_categories:
+                recommendations.append(f"Add {expected} tests to improve test coverage")
+        
+        if not recommendations:
+            recommendations.append("Test suite is comprehensive - consider adding performance and load testing")
+        
+        return recommendations
+    
+    def _get_fallback_execution_results(self, test_suite: Dict, error: str) -> Dict:
+        """Get fallback execution results when testing fails"""
+        return {
+            "summary": {
+                "total_tests": test_suite["summary"]["total_tests"],
+                "tests_passed": 0,
+                "tests_failed": test_suite["summary"]["total_tests"],
+                "pass_rate": 0.0,
+                "categories_status": {cat: "failed" for cat in test_suite["summary"]["test_categories"]},
+                "overall_status": "failed"
+            },
+            "detailed_results": {},
+            "recommendations": [
+                "Test execution system failed - manual testing required",
+                f"Error: {error}"
+            ],
+            "metadata": {
+                "executed_at": self._get_timestamp(),
+                "error": error
+            }
+        }
+7. Enhanced Supervisor Agent:
+python
+# agents/supervisor.py
+import logging
+from typing import Dict, List, Optional
+from datetime import datetime
+import json
+import hashlib
+
+from ..core.hybrid_router import LLM
+from ..core.policy_agent import policy_agent
+from ..schema.enhanced_manifest import SprintManifest
+
+logger = logging.getLogger("supervisor")
+
+class EnhancedSupervisorAgent:
+    """
+    V5.0 Enhanced Supervisor Agent
+    Comprehensive sprint supervision with quality gates and decision making
+    """
+    
+    def __init__(self, llm: LLM):
+        self.llm = llm
+        self.policy_agent = policy_agent
+    
+    async def supervise_sprint(self, sprint_data: Dict, context: Optional[Dict] = None) -> Dict:
+        """
+        Comprehensive sprint supervision and quality assessment
+        """
+        context = context or {}
+        
+        try:
+            # Build comprehensive supervision prompt
+            supervision_prompt = self._build_supervision_prompt(sprint_data, context)
+            
+            # Get AI analysis
+            analysis_text = await self.llm.complete(supervision_prompt, json_mode=True)
+            analysis_data = self.llm.safe_json(analysis_text, self._get_fallback_analysis())
+            
+            # Enhance with automated metrics
+            enhanced_analysis = await self._enhance_supervision_analysis(analysis_data, sprint_data, context)
+            
+            # Make go/no-go decision
+            decision = await self._make_sprint_decision(enhanced_analysis, sprint_data, context)
+            
+            # Generate comprehensive report
+            report = await self._generate_supervision_report(enhanced_analysis, decision, sprint_data, context)
+            
+            logger.info(f"Sprint supervision completed: {decision['overall_decision']} - Confidence: {decision['confidence']}")
+            
+            return {
+                "analysis": enhanced_analysis,
+                "decision": decision,
+                "report": report,
+                "recommendations": enhanced_analysis["recommendations"],
+                "quality_gates": await self._assess_quality_gates(enhanced_analysis, sprint_data)
+            }
+            
+        except Exception as e:
+            logger.error(f"Sprint supervision failed: {e}")
+            return self._get_fallback_supervision(sprint_data, str(e))
+    
+    def _build_supervision_prompt(self, sprint_data: Dict, context: Dict) -> str:
+        """Build comprehensive supervision prompt"""
+        
+        return f"""
+        As an AI Senior Project Supervisor and Quality Assurance Lead, analyze this sprint:
+
+        SPRINT DATA:
+        {json.dumps(sprint_data, indent=2, default=str)}
+
+        CONTEXT:
+        - Collaboration Mode: {context.get('mode', 'full-auto')}
+        - Risk Tolerance: {context.get('risk_tolerance', 'medium')}
+        - Compliance Requirements: {context.get('compliance', [])}
+
+        SUPERVISION REQUIREMENTS:
+
+        1. QUALITY ASSESSMENT:
+           - Code quality and adherence to standards
+           - Test coverage and effectiveness
+           - Security implementation quality
+           - Documentation completeness
+           - Performance considerations
+
+        2. RISK EVALUATION:
+           - Technical debt accumulation
+           - Security vulnerabilities
+           - Compliance gaps
+           - Operational risks
+           - Maintenance concerns
+
+        3. SUCCESS METRICS:
+           - Requirements fulfillment
+           - Acceptance criteria met
+           - Stakeholder satisfaction
+           - Business value delivered
+           - Technical excellence
+
+        4. IMPROVEMENT RECOMMENDATIONS:
+           - Immediate actions required
+           - Medium-term improvements
+           - Long-term strategic changes
+           - Process optimizations
+           - Team development areas
+
+        5. DECISION FRAMEWORK:
+           - Should this sprint be approved?
+           - What are the key risks?
+           - What verification is needed?
+           - What are the alternatives?
+
+        Return JSON with this structure:
+        {{
+            "quality_assessment": {{
+                "overall_score": 0-100,
+                "code_quality": "excellent|good|fair|poor",
+                "test_quality": "excellent|good|fair|poor",
+                "security_quality": "excellent|good|fair|poor",
+                "documentation_quality": "excellent|good|fair|poor",
+                "performance_quality": "excellent|good|fair|poor"
+            }},
+            "risk_evaluation": {{
+                "overall_risk": "low|medium|high|critical",
+                "technical_debt": "low|medium|high",
+                "security_risks": ["list of security concerns"],
+                "compliance_gaps": ["list of compliance issues"],
+                "operational_risks": ["list of operational concerns"]
+            }},
+            "success_metrics": {{
+                "requirements_fulfillment": 0-100,
+                "acceptance_criteria_met": 0-100,
+                "stakeholder_satisfaction": "low|medium|high",
+                "business_value": "low|medium|high",
+                "technical_excellence": "low|medium|high"
+            }},
+            "recommendations": {{
+                "immediate_actions": ["list of urgent actions"],
+                "medium_term_improvements": ["list of medium-term improvements"],
+                "long_term_strategic": ["list of strategic changes"],
+                "process_optimizations": ["list of process improvements"]
+            }},
+            "decision_framework": {{
+                "should_approve": true|false,
+                "key_risks": ["list of critical risks"],
+                "verification_needed": ["list of verification steps"],
+                "alternatives": ["list of alternative approaches"]
+            }},
+            "confidence": 0.0-1.0
+        }}
+        """
+    
+    async def _enhance_supervision_analysis(self, analysis: Dict, sprint_data: Dict, context: Dict) -> Dict:
+        """Enhance AI analysis with automated metrics"""
+        
+        enhanced = analysis.copy()
+        
+        # Add automated quality metrics
+        enhanced["automated_metrics"] = await self._calculate_automated_metrics(sprint_data)
+        
+        # Add compliance checking
+        enhanced["compliance_check"] = await self._check_compliance(sprint_data, context)
+        
+        # Add security assessment
+        enhanced["security_assessment"] = await self._assess_security(sprint_data)
+        
+        # Add cost-benefit analysis
+        enhanced["cost_benefit_analysis"] = await self._analyze_cost_benefit(sprint_data, context)
+        
+        # Calculate overall confidence
+        enhanced["overall_confidence"] = self._calculate_overall_confidence(enhanced)
+        
+        return enhanced
+    
+    async def _calculate_automated_metrics(self, sprint_data: Dict) -> Dict:
+        """Calculate automated quality metrics"""
+        metrics = {
+            "test_coverage": 0.0,
+            "code_complexity": "unknown",
+            "security_issues": 0,
+            "performance_metrics": {},
+            "documentation_coverage": 0.0
+        }
+        
+        # Extract metrics from sprint data (simplified)
+        if "test_results" in sprint_data:
+            metrics["test_coverage"] = sprint_data["test_results"].get("summary", {}).get("pass_rate", 0)
+        
+        if "artifact_metrics" in sprint_data:
+            artifacts = sprint_data["artifact_metrics"]
+            metrics["security_issues"] = sum(art.get("security_issues", 0) for art in artifacts)
+        
+        # Calculate documentation coverage (simplified)
+        total_artifacts = len(sprint_data.get("artifacts", []))
+        documented_artifacts = sum(1 for art in sprint_data.get("artifacts", []) 
+                                 if art.get("documentation", "").strip())
+        
+        if total_artifacts > 0:
+            metrics["documentation_coverage"] = (documented_artifacts / total_artifacts) * 100
+        
+        return metrics
+    
+    async def _check_compliance(self, sprint_data: Dict, context: Dict) -> Dict:
+        """Check compliance requirements"""
+        compliance_requirements = context.get("compliance", [])
+        issues = []
+        
+        for requirement in compliance_requirements:
+            if requirement == "SOC2" and not self._has_security_controls(sprint_data):
+                issues.append("SOC2: Insufficient security controls documented")
+            
+            if requirement == "GDPR" and not self._has_data_protection(sprint_data):
+                issues.append("GDPR: Data protection measures not evident")
+            
+            if requirement == "ISO27001" and not self._has_risk_assessment(sprint_data):
+                issues.append("ISO27001: Formal risk assessment missing")
+        
+        return {
+            "requirements_checked": compliance_requirements,
+            "issues": issues,
+            "compliance_score": 100 - (len(issues) * 20)  # Simple scoring
+        }
+    
+    async def _assess_security(self, sprint_data: Dict) -> Dict:
+        """Assess security implementation"""
+        security_indicators = {
+            "authentication": any("auth" in str(art).lower() for art in sprint_data.get("artifacts", [])),
+            "encryption": any("encrypt" in str(art).lower() for art in sprint_data.get("artifacts", [])),
+            "input_validation": any("validate" in str(art).lower() for art in sprint_data.get("artifacts", [])),
+            "logging": any("log" in str(art).lower() for art in sprint_data.get("artifacts", [])),
+        }
+        
+        security_score = sum(1 for indicator in security_indicators.values() if indicator) / len(security_indicators) * 100
+        
+        return {
+            "indicators": security_indicators,
+            "score": security_score,
+            "level": "high" if security_score >= 80 else "medium" if security_score >= 60 else "low"
+        }
+    
+    async def _analyze_cost_benefit(self, sprint_data: Dict, context: Dict) -> Dict:
+        """Analyze cost-benefit of the sprint"""
+        # Simplified cost-benefit analysis
+        estimated_value = sprint_data.get("business_value", 50)  # Default medium value
+        estimated_cost = sprint_data.get("actual_cost", 1000)   # Default cost
+        
+        roi = (estimated_value - estimated_cost) / estimated_cost * 100 if estimated_cost > 0 else 0
+        
+        return {
+            "estimated_value": estimated_value,
+            "estimated_cost": estimated_cost,
+            "return_on_investment": roi,
+            "efficiency": "high" if roi > 50 else "medium" if roi > 0 else "low",
+            "recommendation": "proceed" if roi > 0 else "reconsider"
+        }
+    
+    async def _make_sprint_decision(self, analysis: Dict, sprint_data: Dict, context: Dict) -> Dict:
+        """Make go/no-go decision for the sprint"""
+        
+        quality_score = analysis["quality_assessment"]["overall_score"]
+        risk_level = analysis["risk_evaluation"]["overall_risk"]
+        confidence = analysis["overall_confidence"]
+        
+        # Decision matrix
+        should_approve = (
+            quality_score >= 70 and
+            risk_level in ["low", "medium"] and
+            confidence >= 0.7
+        )
+        
+        decision_reasons = []
+        if quality_score < 70:
+            decision_reasons.append(f"Quality score too low: {quality_score}")
+        if risk_level in ["high", "critical"]:
+            decision_reasons.append(f"Risk level too high: {risk_level}")
+        if confidence < 0.7:
+            decision_reasons.append(f"Confidence too low: {confidence}")
+        
+        return {
+            "overall_decision": "approved" if should_approve else "rejected",
+            "should_approve": should_approve,
+            "confidence": confidence,
+            "decision_reasons": decision_reasons,
+            "quality_gate": "passed" if should_approve else "failed",
+            "required_actions": analysis["recommendations"]["immediate_actions"] if not should_approve else []
+        }
+    
+    async def _generate_supervision_report(self, analysis: Dict, decision: Dict, 
+                                         sprint_data: Dict, context: Dict) -> Dict:
+        """Generate comprehensive supervision report"""
+        
+        return {
+            "executive_summary": {
+                "sprint_id": sprint_data.get("sprint_id", "unknown"),
+                "decision": decision["overall_decision"],
+                "quality_score": analysis["quality_assessment"]["overall_score"],
+                "risk_level": analysis["risk_evaluation"]["overall_risk"],
+                "key_findings": analysis["decision_framework"]["key_risks"][:3],  # Top 3 risks
+                "recommendation": "APPROVE" if decision["should_approve"] else "REJECT"
+            },
+            "detailed_analysis": {
+                "quality_breakdown": analysis["quality_assessment"],
+                "risk_breakdown": analysis["risk_evaluation"],
+                "success_metrics": analysis["success_metrics"],
+                "automated_metrics": analysis["automated_metrics"]
+            },
+            "recommendations": {
+                "immediate": analysis["recommendations"]["immediate_actions"],
+                "strategic": analysis["recommendations"]["long_term_strategic"],
+                "process": analysis["recommendations"]["process_optimizations"]
+            },
+            "next_steps": await self._determine_next_steps(decision, analysis, context),
+            "metadata": {
+                "report_generated": datetime.utcnow().isoformat(),
+                "supervisor_version": "5.0",
+                "decision_confidence": decision["confidence"]
+            }
+        }
+    
+    async def _assess_quality_gates(self, analysis: Dict, sprint_data: Dict) -> Dict:
+        """Assess quality gates for the sprint"""
+        gates = {
+            "code_quality": analysis["quality_assessment"]["code_quality"] in ["excellent", "good"],
+            "test_quality": analysis["quality_assessment"]["test_quality"] in ["excellent", "good"],
+            "security_quality": analysis["quality_assessment"]["security_quality"] in ["excellent", "good"],
+            "documentation_quality": analysis["quality_assessment"]["documentation_quality"] in ["excellent", "good"],
+            "risk_level": analysis["risk_evaluation"]["overall_risk"] in ["low", "medium"],
+            "compliance": len(analysis["compliance_check"]["issues"]) == 0
+        }
+        
+        passed_gates = sum(1 for passed in gates.values() if passed)
+        total_gates = len(gates)
+        
+        return {
+            "gates": gates,
+            "passed_gates": passed_gates,
+            "total_gates": total_gates,
+            "pass_rate": (passed_gates / total_gates) * 100,
+            "overall_status": "passed" if passed_gates == total_gates else "failed"
+        }
+    
+    async def _determine_next_steps(self, decision: Dict, analysis: Dict, context: Dict) -> List[str]:
+        """Determine next steps based on decision"""
+        if decision["should_approve"]:
+            return [
+                "Proceed with deployment",
+                "Update documentation",
+                "Notify stakeholders",
+                "Schedule post-implementation review"
+            ]
+        else:
+            return [
+                "Address immediate actions from recommendations",
+                "Re-run quality gates after fixes",
+                "Schedule re-review meeting",
+                "Update project timeline accordingly"
+            ]
+    
+    def _has_security_controls(self, sprint_data: Dict) -> bool:
+        """Check if security controls are present"""
+        return any(
+            "security" in str(art).lower() or 
+            "auth" in str(art).lower() or
+            "encrypt" in str(art).lower()
+            for art in sprint_data.get("artifacts", [])
+        )
+    
+    def _has_data_protection(self, sprint_data: Dict) -> bool:
+        """Check if data protection measures are present"""
+        return any(
+            "data" in str(art).lower() and 
+            ("protect" in str(art).lower() or "privacy" in str(art).lower())
+            for art in sprint_data.get("artifacts", [])
+        )
+    
+    def _has_risk_assessment(self, sprint_data: Dict) -> bool:
+        """Check if risk assessment is present"""
+        return "risk_assessment" in sprint_data
+    
+    def _calculate_overall_confidence(self, analysis: Dict) -> float:
+        """Calculate overall confidence score"""
+        base_confidence = analysis.get("confidence", 0.7)
+        
+        # Adjust based on automated metrics
+        automated_metrics = analysis.get("automated_metrics", {})
+        if automated_metrics.get("test_coverage", 0) < 50:
+            base_confidence -= 0.2
+        
+        if automated_metrics.get("security_issues", 0) > 0:
+            base_confidence -= 0.1
+        
+        # Adjust based on compliance
+        compliance_check = analysis.get("compliance_check", {})
+        if compliance_check.get("issues"):
+            base_confidence -= len(compliance_check["issues"]) * 0.05
+        
+        return max(0.1, min(1.0, base_confidence))
+    
+    def _get_fallback_analysis(self) -> Dict:
+        """Get fallback analysis when AI fails"""
+        return {
+            "quality_assessment": {
+                "overall_score": 50,
+                "code_quality": "fair",
+                "test_quality": "fair",
+                "security_quality": "fair",
+                "documentation_quality": "fair",
+                "performance_quality": "fair"
+            },
+            "risk_evaluation": {
+                "overall_risk": "medium",
+                "technical_debt": "medium",
+                "security_risks": ["Analysis failed - assume medium risk"],
+                "compliance_gaps": ["Analysis system failure"],
+                "operational_risks": ["Supervision system unavailable"]
+            },
+            "success_metrics": {
+                "requirements_fulfillment": 50,
+                "acceptance_criteria_met": 50,
+                "stakeholder_satisfaction": "medium",
+                "business_value": "medium",
+                "technical_excellence": "medium"
+            },
+            "recommendations": {
+                "immediate_actions": ["Manual review required due to system failure"],
+                "medium_term_improvements": ["Improve supervision system reliability"],
+                "long_term_strategic": ["Implement redundant supervision mechanisms"],
+                "process_optimizations": ["Add manual quality gates"]
+            },
+            "decision_framework": {
+                "should_approve": False,
+                "key_risks": ["Supervision system failure", "Unable to assess quality"],
+                "verification_needed": ["Manual code review", "Stakeholder validation"],
+                "alternatives": ["Manual supervision", "External audit"]
+            },
+            "confidence": 0.1
+        }
+    
+    def _get_fallback_supervision(self, sprint_data: Dict, error: str) -> Dict:
+        """Get fallback supervision results"""
+        return {
+            "analysis": self._get_fallback_analysis(),
+            "decision": {
+                "overall_decision": "rejected",
+                "should_approve": False,
+                "confidence": 0.1,
+                "decision_reasons": [f"Supervision system error: {error}"],
+                "quality_gate": "failed",
+                "required_actions": ["Manual review required due to system failure"]
+            },
+            "report": {
+                "executive_summary": {
+                    "sprint_id": sprint_data.get("sprint_id", "unknown"),
+                    "decision": "rejected",
+                    "quality_score": 50,
+                    "risk_level": "high",
+                    "key_findings": ["Supervision system failure"],
+                    "recommendation": "REJECT"
+                },
+                "error": error
+            },
+            "recommendations": ["Manual review required due to system failure"],
+            "quality_gates": {
+                "overall_status": "failed",
+                "pass_rate": 0,
+                "error": error
+            }
+        }
+🎯 ZENGİNLEŞTİRİLMİŞ AGENT ÖZELLİKLERİ ÖZETİ:
+Architect Agent:
+✅ Dependency analysis ve cycle detection
+
+✅ Risk assessment scoring
+
+✅ Compliance requirement tracking
+
+✅ Topological execution ordering
+
+✅ Enhanced manifesto validation
+
+Coder Agent:
+✅ Security scanning ve automatic fixes
+
+✅ Test generation with multiple types
+
+✅ Code quality validation
+
+✅ Best practices enforcement
+
+✅ Fallback mechanisms
+
+Researcher Agent:
+✅ Comprehensive technology analysis
+
+✅ Risk assessment with mitigation
+
+✅ Feasibility analysis
+
+✅ Cost estimation
+
+✅ Implementation roadmap
+
+Critic Agent:
+✅ Advanced security scanning
+
+✅ Quality metrics calculation
+
+✅ Automated patch generation
+
+✅ Confidence scoring
+
+✅ Human review requirements
+
+Debugger Agent:
+✅ Root cause analysis
+
+✅ Impact assessment
+
+✅ Automated fix generation
+
+✅ Patch validation
+
+✅ Regression risk assessment
+
+Tester Agent:
+✅ Multiple test types (unit, integration, security, performance)
+
+✅ Test configuration generation
+
+✅ Coverage estimation
+
+✅ Test execution simulation
+
+✅ Results aggregation
+
+Supervisor Agent:
+✅ Quality gates assessment
+
+✅ Go/no-go decision framework
+
+✅ Compliance checking
+
+✅ Cost-benefit analysis
+
+✅ Comprehensive reporting

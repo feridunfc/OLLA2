@@ -1,0 +1,10 @@
+
+metadata:
+  author: system
+  version: 1.0
+  description: Secure API integration directive
+requirements:
+  - All API keys stored in environment variables
+  - HTTPS enforced
+  - OAuth2 tokens auto-refresh
+  - Audit logs enabled

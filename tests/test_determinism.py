@@ -24,3 +24,7 @@ def test_manifest_determinism(tmp_path):
 
     # Ledger doğrulaması
     assert verify_manifest(str(manifest), hash3) is True or False  # sadece çalışırlığı test eder
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__])
