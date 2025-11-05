@@ -1,6 +1,6 @@
 # agents/coder.py
 import logging
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 import re
 
 from ..core.hybrid_router import LLM
@@ -12,7 +12,7 @@ logger = logging.getLogger("coder")
 
 class EnhancedCoderAgent:
     """
-    V5.0 Enhanced Coder Agent
+    V5.0 Enhanced Coder Agent - GERÇEK KOD ÜRETİMİ
     Advanced code generation with security, testing, and best practices
     """
 
