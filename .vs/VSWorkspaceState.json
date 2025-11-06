@@ -1,0 +1,13 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\env",
+    "\\env\\Lib",
+    "\\env\\Lib\\site-packages",
+    "\\env\\Lib\\site-packages\\cffi",
+    "\\multiai",
+    "\\multiai\\agents"
+  ],
+  "SelectedNode": "\\env\\Lib\\site-packages\\cffi\\backend_ctypes.py",
+  "PreviewInSolutionExplorer": false
+}

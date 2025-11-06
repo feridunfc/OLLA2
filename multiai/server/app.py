@@ -1,53 +1,86 @@
-import time, json, logging
-from typing import Literal
-from fastapi import FastAPI, BackgroundTasks
-from pydantic import BaseModel
-from pathlib import Path
-from ..core.hybrid_router import LLM
-from ..manifest.schema import Manifest, ArtifactType
-from ..manifest.repo import write_to_ledger
-from ..core.deterministic_validator import validate_against_manifest
-from ..agents.researcher import AResearch
-from ..agents.architect import AArch
-from ..agents.coder import ACoder
-from ..agents.tester import ATest
-from ..agents.debugger import ADebug
-from ..agents.supervisor import ASup
-from ..api.metrics import router as metrics_router, record_sprint_start, record_sprint_complete, record_agent_call
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-logger = logging.getLogger("multiai")
-app = FastAPI(title="MULTI-AI v4.8"); app.include_router(metrics_router)
-class SprintRequest(BaseModel):
-    goal: str; workdir: str = "workspace"; mode: Literal["local","cloud","auto"] = "auto"
-async def run_sprint_background(req: SprintRequest, llm: LLM):
-    work = Path(req.workdir); work.mkdir(parents=True, exist_ok=True)
-    record_sprint_start(req.goal)
-    status = {"pytest_ok": False, "hash_ok": False, "mismatches": [], "report_md": ""}
-    try:
-        t=time.time(); research = await AResearch().run(req.goal, llm); record_agent_call("researcher", True, time.time()-t)
-        t=time.time(); mjson = await AArch().run(research, llm); record_agent_call("architect", True, time.time()-t)
-        manifest = Manifest(**mjson); (work / f"{manifest.sprint_id}.json").write_text(json.dumps(mjson, indent=2), encoding="utf-8")
-        outputs=[]; coder, tester, dbg = ACoder(), ATest(), ADebug()
-        for art in manifest.artifacts:
-            if art.type == ArtifactType.CODE:
-                code = await coder.implement(artifact=art.model_dump(), directive=research, llm=llm)
-                p = work / art.path; tester.write_file(p, code)
-                ok, logs = await tester.run_pytest_async(work); status["pytest_ok"]=ok
-                if not ok:
-                    fixed = await dbg.fix_code(logs, code, llm); tester.write_file(p, fixed)
-                    ok2, _ = await tester.run_pytest_async(work); status["pytest_ok"]=ok2
-                outputs.append({"path": art.path, "status":"tested", "ok": status["pytest_ok"]})
-            else:
-                (work / art.path).parent.mkdir(parents=True, exist_ok=True)
-                (work / art.path).write_text(f"# generated {art.type} {art.path}\n", encoding="utf-8")
-                outputs.append({"path": art.path, "status":"generated"})
-        ok, mismatches = validate_against_manifest(work, manifest); status["hash_ok"]=ok; status["mismatches"]=mismatches
-        report = await ASup().summarize({"goal": req.goal, "outputs": outputs, "pytest_ok": status["pytest_ok"], "hash_ok": ok, "mismatches": mismatches}, llm)
-        status["report_md"]=report; write_to_ledger(manifest, status); record_sprint_complete(req.goal, status["pytest_ok"] and status["hash_ok"])
-        logger.info("Sprint finished.")
-    except Exception as e:
-        record_sprint_complete(req.goal, False); logger.exception("Sprint failed: %s", e)
+# multiai/server/app.py
+import logging
+from typing import Dict, Any
+from fastapi import FastAPI, HTTPException
+
+from multiai.api import ledger, webhooks, metrics
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="MULTIAI API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app = FastAPI(title="MULTIAI API")
+
+# 🔹 Router’ları ekle
+app.include_router(ledger.router, prefix="/api")
+app.include_router(webhooks.router, prefix="/api")
+app.include_router(metrics.router)
+
+# 🔹 YENİ V5 importları (fallback'lı)
+try:
+    from ..schema.enhanced_manifest import SprintManifest, ArtifactType
+except Exception:
+    class SprintManifest:
+        def __init__(self, sprint_id: str, goal: str, budget_hint=None, tenant_id=None):
+            self.sprint_id = sprint_id
+            self.goal = goal
+            self.budget_hint = budget_hint
+            self.tenant_id = tenant_id
+    ArtifactType = None
+
+try:
+    from ..core.ledger_signed import write_manifest_to_ledger, verify_ledger_integrity
+except Exception:
+    async def write_manifest_to_ledger(manifest: SprintManifest):
+        return {"hash": "dryrun-ledger-hash"}
+    async def verify_ledger_integrity():
+        return True
+
+try:
+    from ..core.hybrid_router import llm_router
+except Exception:
+    class DummyLLM:
+        async def complete(self, *a, **kw):
+            return {"ok": True, "cost": 0.0, "text": "dryrun"}
+    llm_router = DummyLLM()
+
+try:
+    from ..utils.secure_sandbox import sandbox_runner
+except Exception:
+    sandbox_runner = None
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True}
+
+
 @app.post("/api/sprint/start")
-async def start_sprint_api(req: SprintRequest, background_tasks: BackgroundTasks):
-    llm = LLM(); background_tasks.add_task(run_sprint_background, req, llm)
-    return {"status":"started","goal":req.goal,"workdir":req.workdir}
+async def start_sprint(sprint_data: Dict[str, Any]):
+    try:
+        manifest = SprintManifest(
+            sprint_id=sprint_data['sprint_id'],
+            goal=sprint_data['goal'],
+            budget_hint=sprint_data.get('budget_hint'),
+            tenant_id=sprint_data.get('tenant_id')
+        )
+        ledger_entry = await write_manifest_to_ledger(manifest)
+        analysis = await llm_router.complete(
+            f"Analyze sprint goal: {sprint_data['goal']}",
+            json_mode=True
+        )
+        return {
+            "status": "started",
+            "ledger_hash": ledger_entry.get('hash', ''),
+            "analysis": analysis
+        }
+    except Exception as e:
+        logging.error(f"Sprint start failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

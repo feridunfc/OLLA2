@@ -1,0 +1,1 @@
+-- SQL Migration for approval_requests table
