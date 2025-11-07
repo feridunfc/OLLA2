@@ -1,8 +1,8 @@
 # schema/enhanced_manifest.py
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 
@@ -50,27 +50,34 @@ class Artifact(BaseModel):
     type: ArtifactType
     path: str = Field(..., description="File path relative to project root")
     purpose: str = Field(..., description="Business/technical purpose")
-
-    # Enhanced fields
     dependencies: List[ArtifactDependency] = Field(default_factory=list)
     expected_behavior: str = Field("", description="Expected functional behavior")
     acceptance_criteria: List[str] = Field(default_factory=list)
     risk_assessment: RiskAssessment
+    estimated_effort: float = 0.0      # 🔧 ekle
+    priority: int = 0                  # 🔧 ekle
     compliance_requirements: List[ComplianceRequirement] = Field(default_factory=list)
-
-    # Hash tracking
     expected_sha256: Optional[str] = Field(None, description="Pre-calculated hash")
     actual_sha256: Optional[str] = Field(None, description="Post-execution hash")
-
-    # Metadata
     created_by: str = "system"
-    estimated_effort: int = Field(0, description="Estimated story points")
-    priority: int = Field(1, ge=1, le=5)
 
-    @validator('expected_sha256')
-    def validate_sha256(cls, v):
+    def calculate_expected_hash(self) -> str:
+        from hashlib import sha256
+        data = {
+            "artifact_id": self.artifact_id,
+            "type": self.type,
+            "purpose": self.purpose,
+            "expected_behavior": self.expected_behavior,
+            "acceptance_criteria": self.acceptance_criteria,
+        }
+        return sha256(
+            json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    @field_validator("expected_sha256")
+    def validate_sha256(cls, v: Optional[str]) -> Optional[str]:
         if v and len(v) != 64:
-            raise ValueError('SHA256 must be 64 characters')
+            raise ValueError("SHA256 must be 64 characters")
         return v
 
 
@@ -78,24 +85,14 @@ class SprintManifest(BaseModel):
     sprint_id: str = Field(..., description="Unique sprint identifier")
     sprint_purpose: str = Field(..., description="Business goal")
     version: str = Field("5.0", description="Manifest schema version")
-
-    # Enhanced artifacts
     artifacts: List[Artifact] = Field(..., description="All artifacts in this sprint")
-
-    # Dependency graph
     dependency_graph: Dict[str, List[str]] = Field(default_factory=dict)
-
-    # Risk & Compliance
     overall_risk: RiskAssessment
     compliance_requirements: List[ComplianceRequirement] = Field(default_factory=list)
-
-    # Execution context
     collaboration_mode: str = Field("full-auto", description="full-auto/guided/manual")
     requires_approval: bool = Field(False)
     budget_allocation: float = Field(0.0, description="Allocated budget for this sprint")
-
-    # Metadata
-    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     created_by: str = "architect_agent"
     tenant_id: Optional[str] = Field(None, description="Multi-tenant isolation")
 
@@ -103,66 +100,47 @@ class SprintManifest(BaseModel):
         frozen = True  # Immutable for determinism
 
     def calculate_manifest_hash(self) -> str:
-        """Calculate deterministic hash of the manifest"""
-        manifest_dict = self.dict(exclude={'actual_sha256'})  # Exclude runtime fields
-        manifest_json = json.dumps(manifest_dict, sort_keys=True, separators=(',', ':'))
+        manifest_dict = self.model_dump(exclude={"actual_sha256"})
+        manifest_json = json.dumps(manifest_dict, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(manifest_json.encode()).hexdigest()
 
     def validate_dependencies(self) -> bool:
-        """Validate artifact dependencies for cycles and consistency"""
-        visited = set()
-        recursion_stack = set()
+        visited, recursion_stack = set(), set()
 
-        def has_cycle(artifact_id: str) -> bool:
-            if artifact_id in recursion_stack:
+        def has_cycle(aid: str) -> bool:
+            if aid in recursion_stack:
                 return True
-            if artifact_id in visited:
+            if aid in visited:
                 return False
-
-            visited.add(artifact_id)
-            recursion_stack.add(artifact_id)
-
-            for dep in self.dependency_graph.get(artifact_id, []):
+            visited.add(aid)
+            recursion_stack.add(aid)
+            for dep in self.dependency_graph.get(aid, []):
                 if has_cycle(dep):
                     return True
-
-            recursion_stack.remove(artifact_id)
+            recursion_stack.remove(aid)
             return False
 
-        for artifact in self.artifacts:
-            if has_cycle(artifact.artifact_id):
-                return False
-        return True
+        return not any(has_cycle(a.artifact_id) for a in self.artifacts)
 
     def get_execution_order(self) -> List[str]:
-        """Get topological sort of artifacts for execution order"""
         if not self.validate_dependencies():
             raise ValueError("Cyclic dependencies detected")
+        visited, order = set(), []
 
-        visited = set()
-        order = []
-
-        def visit(artifact_id: str):
-            if artifact_id not in visited:
-                visited.add(artifact_id)
-                for dep in self.dependency_graph.get(artifact_id, []):
+        def visit(aid: str):
+            if aid not in visited:
+                visited.add(aid)
+                for dep in self.dependency_graph.get(aid, []):
                     visit(dep)
-                order.append(artifact_id)
+                order.append(aid)
 
-        for artifact in self.artifacts:
-            visit(artifact.artifact_id)
-
+        for a in self.artifacts:
+            visit(a.artifact_id)
         return list(reversed(order))
 
     def calculate_risk_score(self) -> float:
-        """Calculate overall risk score for the sprint"""
         if not self.artifacts:
             return 0.0
-
-        total_risk = sum(
-            artifact.risk_assessment.score * artifact.estimated_effort
-            for artifact in self.artifacts
-        )
-        total_effort = sum(artifact.estimated_effort for artifact in self.artifacts)
-
+        total_risk = sum(a.risk_assessment.score * a.estimated_effort for a in self.artifacts)
+        total_effort = sum(a.estimated_effort for a in self.artifacts)
         return total_risk / total_effort if total_effort > 0 else 0.0
