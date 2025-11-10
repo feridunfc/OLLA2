@@ -35,3 +35,7 @@ class PolicyAgent:
         """Validate request against policy"""
         # Minimal placeholder validation for Sprint-0
         return {"allowed": True, "reason": "OK"}
+
+def policy_agent():
+    """Legacy placeholder for tests."""
+    return {"status": "ok"}

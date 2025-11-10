@@ -11,6 +11,6 @@ async def _run():
     return res
 
 def test_apply_and_test_patch():
-    res = asyncio.get_event_loop().run_until_complete(_run())
+    res = asyncio.run(_run())
     assert "success" in res and "test_results" in res
     assert res["success"] is True
