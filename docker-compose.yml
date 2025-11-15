@@ -3,6 +3,8 @@
     build: .
     ports:
       - "8000:8000"
+    networks:
+      - olla2-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
@@ -18,6 +20,8 @@
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--web.enable-lifecycle'
+    networks:
+      - olla2-network
 
   grafana:
     image: grafana/grafana:latest
@@ -27,3 +31,11 @@
       - GF_SECURITY_ADMIN_PASSWORD=olla2123
       - GF_SECURITY_ADMIN_USER=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    networks:
+      - olla2-network
+
+networks:
+  olla2-network:
+    driver: bridge
